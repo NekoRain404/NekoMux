@@ -104,14 +104,24 @@ class CredentialListNotifier extends AsyncNotifier<List<Credential>> {
   /// Removes every credential and its stored secret, refreshing once.
   /// 删除全部凭据及其已存储的密钥，且只刷新一次。
   ///
-  /// Looping over [deleteItem] would work, but each call refreshes on its own
-  /// and this notifier is watched by the host notifier — so clearing N
-  /// credentials rebuilt the host list N times and re-queried both tables each
-  /// time. On a device with a few dozen saved hosts that is visible as a stall
-  /// on a button that should feel instant.
-  /// 循环调用 [deleteItem] 也能用，但它每删一条就自行刷新一次，而本通知器又被主机
-  /// 通知器 watch——于是清空 N 条凭据会让主机列表重建 N 次，每次都重查两张表。
-  /// 在存了几十台主机的设备上，这会让一个本应瞬间完成的按钮出现可见卡顿。
+  /// Looping over [deleteItem] would work; this exists because one statement
+  /// and one database round trip is the honest description of a bulk wipe,
+  /// rather than N of each.
+  ///
+  /// An earlier version of this comment claimed the loop would rebuild the host
+  /// list N times, since this notifier is watched by the host notifier. **That
+  /// claim was wrong and was removed after it was tested**: Riverpod coalesces
+  /// invalidations issued between two frames, so a loop rebuilds once, exactly
+  /// like this method does. The reason to prefer this is the statement count,
+  /// not a rebuild count — do not reintroduce an argument that cannot be
+  /// observed.
+  /// 循环调用 [deleteItem] 也能用；这个方法存在的理由是：整批清空用一条语句、一次数据库
+  /// 往返来描述才诚实，而不是各 N 次。
+  ///
+  /// 本注释早先声称该循环会让主机列表重建 N 次（因为本通知器被主机通知器 watch）。
+  /// **那个说法是错的，经测试后已删除**：Riverpod 会合并两帧之间发出的失效通知，因此
+  /// 循环同样只重建一次，与本法无异。选择本条实现的理由是语句数量，不是重建次数——
+  /// 不要再引入一个无法被观察到的论据。
   ///
   /// Secrets are removed before the rows, so an interruption can only leave a
   /// credential whose secret is gone (visible, and already handled elsewhere as
