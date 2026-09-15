@@ -181,6 +181,53 @@ enum TransferSaveOutcome {
 /// downloading it again.
 /// 暂存副本在此之后有意保留：它位于应用缓存中，系统随时可以清理它，留着它不花什么
 /// 代价，却能让用户不必重新下载就能再存一份到别处。
+/// Releases the staged copy behind [task], because the row that held it is gone.
+/// 释放 [task] 背后的暂存副本，因为它所在的那一行已经消失。
+///
+/// A row is the only handle on a staged file: it is the only place that offers to
+/// save it. Once the row is dismissed the bytes are unreachable, and leaving them
+/// behind costs the user's storage in a cache this app never sweeps — which is
+/// what a batch of two hundred downloads would otherwise leave there. Saving is
+/// the one action that keeps the copy on purpose (see [saveTransferToDevice]),
+/// and it is a different action from dismissing.
+/// 行是暂存文件唯一的把手：只有它提供保存。行一旦被关闭，那些字节就再也够不着了，而把它们
+/// 留着，只会在本应用从不清扫的缓存里占用用户的存储——否则一批两百个下载就会在那里留下这些。
+/// 保存是唯一有意保留副本的操作（见 [saveTransferToDevice]），而它与关闭是两回事。
+///
+/// Best-effort and silent. A file that is already gone, a directory the system
+/// cleared and a filesystem that refuses all mean the same thing to the caller —
+/// there is nothing left to release — and none of them is worth a word on screen.
+/// 尽力而为且不出声。文件早已不存在、目录已被系统清空、文件系统拒绝，对调用方都是同一件
+/// 事——已经没有东西可以释放——而没有一种值得在屏幕上说一句。
+Future<void> discardStagedFile(TransferTask task) async {
+  final path = task.localPath;
+  // An upload's local path is the user's own file, not a copy this app made, and
+  // deleting it would delete their data; a task that is still moving still owns
+  // its file, so a row dismissed mid-transfer leaves the bytes to the writer.
+  // 上传的本地路径是用户自己的文件，不是本应用做出的副本，删掉它就是删掉他们的数据；
+  // 仍在进行中的任务仍然拥有它的文件，因此传输途中被关闭的行把字节留给写入方。
+  if (path == null || task.direction != TransferDirection.download) return;
+  if (!task.isTerminal) return;
+  try {
+    final file = File(path);
+    if (await file.exists()) await file.delete();
+  } catch (_) {
+    // The cache is the system's to reclaim anyway. / 缓存本来就由系统回收。
+  }
+}
+
+/// Releases the staged copies behind every download in [tasks].
+/// 释放 [tasks] 中每一个下载背后的暂存副本。
+///
+/// For "clear finished", which dismisses a whole group of rows at once and so has
+/// to let go of a whole group of files with them.
+/// 用于「清除已结束」：它一次关闭整组行，因此也要随之放掉整组文件。
+Future<void> discardStagedFiles(Iterable<TransferTask> tasks) async {
+  for (final task in tasks) {
+    await discardStagedFile(task);
+  }
+}
+
 Future<TransferSaveOutcome> saveTransferToDevice(TransferTask task) async {
   final path = task.localPath;
   if (path == null) return TransferSaveOutcome.missing;

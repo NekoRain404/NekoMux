@@ -7,6 +7,8 @@
 // 它是模态面板而不是页面，因为它是**叠加**在用户当时所做的事情之上打开的，并且预期会
 // 被关掉——文件管理器在下方保持原位，而一次传输不需要独占屏幕。
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -105,7 +107,7 @@ class TransferSheet extends ConsumerWidget {
                 ),
                 TextButton.icon(
                   onPressed: view.hasFinished
-                      ? ref.read(transferQueueProvider.notifier).clearFinished
+                      ? () => _clearFinished(ref)
                       : null,
                   icon: const Icon(Icons.playlist_remove, size: 18),
                   label: Text(
@@ -132,6 +134,27 @@ class TransferSheet extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Clears every stopped row, and releases the staged bytes those rows were the
+  /// only handle on.
+  /// 清除所有已停止的行，并释放那些行曾是其唯一把手的暂存字节。
+  ///
+  /// A row is the only place that offers to save its staged file, so dismissing
+  /// the row and keeping the file would leave bytes on the user's storage that
+  /// nothing in this app can reach again — and a batch download is exactly the
+  /// case where that adds up. Read before clearing, because afterwards nothing
+  /// names those files any more.
+  /// 行是唯一提供保存其暂存文件的地方，因此关闭行却留着文件，只会在用户的存储上留下本应用
+  /// 再也够不着的字节——而批量下载正是这种事情会累积起来的情形。先读后清，因为清除之后
+  /// 就再没有东西指向那些文件了。
+  void _clearFinished(WidgetRef ref) {
+    final finished = ref
+        .read(transferQueueProvider)
+        .where((task) => task.isTerminal)
+        .toList();
+    ref.read(transferQueueProvider.notifier).clearFinished();
+    unawaited(discardStagedFiles(finished));
   }
 }
 
@@ -323,7 +346,15 @@ class TransferTaskRow extends ConsumerWidget {
                     icon: Icons.delete_outline,
                     label: t('delete'),
                     color: cs.error,
-                    onTap: () => notifier.remove(task.id),
+                    onTap: () {
+                      notifier.remove(task.id);
+                      // Dismissing the row is also what lets go of the file it
+                      // was the only handle on; fire-and-forget, so the row
+                      // disappears on the tap rather than on the unlink.
+                      // 关闭这一行，同时也是放掉那个只有它才指向的文件；即发即忘，
+                      // 因此行在点击时消失，而不是等到文件被删除。
+                      unawaited(discardStagedFile(task));
+                    },
                   ),
                   // Only a download that finished has something to hand to the
                   // save dialog. An upload's bytes are already on the server and

@@ -151,6 +151,28 @@ SftpFailure _fallbackFailure(TransferDirection direction) =>
     ? SftpFailure.write
     : SftpFailure.read;
 
+/// What a batch download did with a selection larger than what it could queue.
+/// 一次批量下载对一个大于其承载能力的选中集做了什么。
+///
+/// Two numbers and no sentence: how many entries were ticked, and how many
+/// downloads the tap created. The difference is what a batch cannot carry — a
+/// directory above all, since this queue has no recursive walk — and naming both
+/// numbers is the honest way to say so with the words the table has. A sentence
+/// naming one cause would be wrong for the other: a ticked path can also leave
+/// the listing in a refresh, and then it is not a directory that was left behind.
+/// 两个数字，没有句子：勾选了多少条目，以及这次点击创建了多少个下载。差额正是批量无法
+/// 承载的部分——首先是目录，因为这条队列没有递归遍历——而把两个数字都说出来，才是用表里
+/// 已有的词诚实表达它的方式。只说出一种原因的句子对另一种就是错的：一条已勾选的路径也可能
+/// 在一次刷新中离开列表，那时被留下的就不是目录了。
+///
+/// Only shown when the two numbers differ; equal ones say nothing a tapped
+/// action has not already said, and the transfer indicator is where a plain
+/// success shows up.
+/// 仅在两个数字不同时显示；相等时它什么也没说出这次点击尚未说过的话，而普通的成功由传输
+/// 指示器负责呈现。
+String batchDownloadReport({required int queued, required int selected}) =>
+    '${t('selected')}: $selected · ${t('download')}: $queued';
+
 /// Whether any task in [tasks] still has work to do.
 /// [tasks] 中是否仍有任务有待完成。
 bool hasActiveTransfers(List<TransferTask> tasks) =>

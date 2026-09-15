@@ -23,6 +23,7 @@ import 'sftp/sftp_dialogs.dart';
 import 'sftp/sftp_error_text.dart';
 import 'sftp/sftp_file_list.dart';
 import 'sftp/sftp_path.dart';
+import 'sftp/sftp_status_view.dart';
 import 'transfer/transfer_actions.dart';
 import 'transfer/transfer_format.dart';
 import 'transfer/transfer_indicator.dart';
@@ -215,6 +216,17 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// The directory the page is showing, in the path bar and for building paths.
   /// 页面正在显示的目录，用于路径栏，也用于拼接子路径。
   String get _currentDir => _directory.requestedPath;
+
+  /// What a batch download of the ticked entries would queue, and what it cannot.
+  /// 对被勾选条目的批量下载会入队什么，以及它无法承载什么。
+  ///
+  /// Computed from [_files] rather than from the selection alone, because a task
+  /// needs the entry's name and size, and so that the tasks come out in the order
+  /// the list shows.
+  /// 由 [_files] 而不是仅由选择集算出，因为任务需要条目的名称与大小，也为了让任务按列表
+  /// 显示的顺序产生。
+  BatchDownloadPlan get _batchPlan =>
+      BatchDownloadPlan.of(_files, _selection.paths);
 
   /// Path bar segments for [_currentDir].
   /// [_currentDir] 对应的路径栏片段。
@@ -444,6 +456,46 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     queueDownloadToStaging(ref, hostId: widget.host.id, file: file),
   );
 
+  /// Queues one download per ticked file, and says what it could not carry.
+  /// 为每个被勾选的文件各排入一次下载，并说出它无法承载的部分。
+  ///
+  /// Synchronous, like the single-file download it repeats: nothing here awaits a
+  /// socket or a dialog, so a selection of two hundred files costs one loop over
+  /// the entries and one appended batch of tasks, and the frame that handled the
+  /// tap still paints on time.
+  /// 与它所重复的单文件下载一样是同步的：这里不等待套接字或对话框，因此两百个文件的选中集
+  /// 只花掉一次条目遍历和一次任务追加，处理点击的那一帧照常按时绘制。
+  ///
+  /// The selection stays as it was: nothing on the server changed, so the same
+  /// entries can be downloaded again or deleted next, and a tick set the user
+  /// built by hand is not something to throw away on their behalf.
+  /// 选择集保持不变：服务器上没有任何改变，因此同一批条目可以再下一次或被接着删除，而用户
+  /// 亲手勾出来的集合不该由我们替他们丢掉。
+  void _queueBatchDownload() {
+    final plan = _batchPlan;
+    if (plan.files.isEmpty) return;
+
+    final result = queueBatchDownloadToStaging(
+      ref,
+      hostId: widget.host.id,
+      files: plan.files,
+    );
+    _reportTransfer(result.outcome);
+    // Not an error: the batch is queued and running. What the user has not been
+    // told yet is that the queue took fewer entries than they ticked, and the
+    // answer to that is the two numbers rather than a red banner.
+    // 这不是错误：整批已入队并在运行。用户尚未被告知的，是队列收下的条目少于他们勾选的
+    // 数量，而对此的答复是两个数字，不是一条红色的横幅。
+    if (plan.skipped > 0) {
+      _showSnack(
+        batchDownloadReport(
+          queued: result.queued,
+          selected: _selection.count,
+        ),
+      );
+    }
+  }
+
   /// Reports the one outcome a transfer action cannot report by itself: a
   /// device-side failure, which has no row to appear on because nothing was ever
   /// queued. Everything else shows up in the transfer list on its own.
@@ -670,62 +722,16 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   }
 
   Widget _buildBody() {
-    final cs = Theme.of(context).colorScheme;
-    if (_isConnecting) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: cs.secondary),
-            const SizedBox(height: 16),
-            Text(
-              t('connecting'),
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.6),
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_errorMessage != null && _files.isEmpty) {
-      return Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.cloud_off, size: 56, color: cs.error),
-              const SizedBox(height: 16),
-              Text(
-                _errorMessage!,
-                textAlign: TextAlign.center,
-                maxLines: 6,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.6),
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _retry,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: Text(
-                  t('retry'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: cs.secondary,
-                  foregroundColor: Theme.of(context).scaffoldBackgroundColor,
-                ),
-              ),
-            ],
-          ),
-        ),
+    // Which of the three states the page is in is decided here, where the listing
+    // and the load state live; what a state looks like is not, because none of the
+    // drawing needs either of them.
+    // 页面处于三种状态中的哪一种由这里决定——列表与加载状态都在这里；而每种状态长什么样
+    // 不由这里决定，因为绘制它们不需要这两样中的任何一样。
+    if (_isConnecting || (_errorMessage != null && _files.isEmpty)) {
+      return SftpStatusView(
+        isConnecting: _isConnecting,
+        errorMessage: _errorMessage,
+        onRetry: _retry,
       );
     }
 
@@ -761,6 +767,8 @@ class _SftpPageState extends ConsumerState<SftpPage> {
         if (_selection.isActive)
           SftpSelectionBar(
             selectedCount: _selection.count,
+            fileCount: _batchPlan.files.length,
+            onDownload: _queueBatchDownload,
             onDelete: _showBatchDeleteConfirm,
             onCancel: _exitSelectionMode,
           )

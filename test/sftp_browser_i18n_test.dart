@@ -103,6 +103,8 @@ void main() {
               ),
               SftpSelectionBar(
                 selectedCount: 2,
+                fileCount: 1,
+                onDownload: () {},
                 onDelete: () {},
                 onCancel: () {},
               ),

@@ -107,6 +107,118 @@ TransferQueueOutcome queueUpload(
   return TransferQueueOutcome.queued;
 }
 
+/// What a batch download of the ticked entries would queue, and what it cannot.
+/// 对被勾选条目的批量下载会入队什么，以及它无法承载什么。
+///
+/// A directory is why this type exists: the queue moves *files* — one remote path
+/// to one local path, with no recursive walk anywhere behind it — so a ticked
+/// directory has nothing it could enqueue. Dropping it without a word would be a
+/// lie about what the tap did, hence [skipped]: the number of ticked entries this
+/// plan leaves behind, counted rather than explained, because there are two ways
+/// to land there (a directory, or a path a refresh removed from the listing after
+/// it was ticked) and a message naming one of them would be wrong about the other.
+/// 目录正是本类型存在的理由：队列搬运的是**文件**——一条远程路径对一条本地路径，背后没有
+/// 任何递归遍历——因此被勾选的目录没有东西可以入队。只字不提地丢掉它，就是对这次点击做了
+/// 什么说谎，因此有了 [skipped]：本方案留下的已勾选条目数，只计数而不解释，因为落到这里的
+/// 途径有两条（目录，或某条在勾选之后被刷新从列表中移除的路径），而只说出其中一条的文案
+/// 对另一条就是错的。
+class BatchDownloadPlan {
+  /// The ticked entries that are files, in listing order.
+  /// 已勾选中属于文件的条目，按列表顺序。
+  final List<FileItem> files;
+
+  /// How many ticked entries this plan cannot queue.
+  /// 本方案无法入队的已勾选条目数。
+  final int skipped;
+
+  const BatchDownloadPlan(this.files, this.skipped);
+
+  /// The plan for [selectedPaths] among [entries].
+  /// [entries] 之中 [selectedPaths] 对应的方案。
+  ///
+  /// Driven by [entries] and not by the selection, which is what puts the tasks
+  /// in the order the user is looking at; and it counts a ticked path that is not
+  /// in [entries] as skipped, because a path is not enough to download — the name
+  /// and the size a task carries both come from the entry.
+  /// 以 [entries] 为主线而不是以选择集为主线，正是这一点让任务按用户眼前的顺序排列；
+  /// 它把不在 [entries] 中的已勾选路径计入 skipped，因为光有路径不足以发起下载——任务
+  /// 携带的名称与大小都来自条目。
+  factory BatchDownloadPlan.of(
+    List<FileItem> entries,
+    Set<String> selectedPaths,
+  ) {
+    final files = <FileItem>[
+      for (final entry in entries)
+        if (!entry.isDirectory && selectedPaths.contains(entry.path)) entry,
+    ];
+    return BatchDownloadPlan(files, selectedPaths.length - files.length);
+  }
+}
+
+/// What a batch download actually did.
+/// 一次批量下载实际做了什么。
+class BatchDownloadResult {
+  /// How many tasks reached the queue.
+  /// 有多少个任务进入了队列。
+  final int queued;
+
+  /// [TransferQueueOutcome.queued] when every file was queued, otherwise the
+  /// device-side failure that stopped one of them — the only other thing
+  /// [queueDownloadToStaging] reports.
+  /// 全部文件都入队时为 [TransferQueueOutcome.queued]，否则是拦下其中某个文件的设备侧
+  /// 失败——那是 [queueDownloadToStaging] 唯一会报告的另一种结局。
+  final TransferQueueOutcome outcome;
+
+  const BatchDownloadResult(this.queued, this.outcome);
+}
+
+/// Queues one download per file in [files], each into this app's staging area.
+/// 为 [files] 中的每个文件各排入一次下载，全都进入本应用的暂存区。
+///
+/// It goes through [queueDownloadToStaging] rather than restating it: the staging
+/// path, the size carried over from the listing and the check that there is
+/// somewhere to write are that function's rules, and a batch that derived them
+/// again would be a second copy of each — the kind that drifts.
+/// 它经由 [queueDownloadToStaging] 而不是复述它：暂存路径、从列表带过来的大小，以及
+/// 「有没有地方可写」的检查都是那条函数的规则，而重新推导它们的批量版本会成为每一条规则的
+/// 第二个副本——也就是会分叉的那一种。
+///
+/// Synchronous end to end, which is what keeps a two-hundred-file selection from
+/// costing a frame: the loop appends to the queue's list and returns, and nothing
+/// in it awaits a socket, a disk or a dialog. The one device call it repeats is
+/// the staging-directory check inside [queueDownloadToStaging] — a stat on a
+/// directory that exists from the first file onwards — and the transfers
+/// themselves then run one at a time, in the order they were queued, on the
+/// queue's own connection.
+/// 从头到尾同步，这正是两百个文件的选中集不会花掉一帧的原因：循环只往队列的列表里追加
+/// 然后返回，其中没有任何一处等待套接字、磁盘或对话框。它唯一重复的设备调用是
+/// [queueDownloadToStaging] 内部的暂存目录检查——从第一个文件起该目录就已存在，因此那只是
+/// 一次 stat——而传输本身随后按入队顺序、在队列自己的连接上逐个运行。
+///
+/// A failure does not abort the batch: the queue's whole contract is that one
+/// unreachable file must not hold up the thirty behind it, and that applies at
+/// enqueue time too. The count says how many got in, and [BatchDownloadResult.outcome]
+/// says whether any did not.
+/// 失败不会中断整批：这条队列的全部契约就是一个取不到的文件不该挡住它后面的三十个，这在
+/// 入队阶段同样成立。计数说明进去了多少个，[BatchDownloadResult.outcome] 说明是否有没进去的。
+BatchDownloadResult queueBatchDownloadToStaging(
+  WidgetRef ref, {
+  required String hostId,
+  required List<FileItem> files,
+}) {
+  var queued = 0;
+  var outcome = TransferQueueOutcome.queued;
+  for (final file in files) {
+    final result = queueDownloadToStaging(ref, hostId: hostId, file: file);
+    if (result == TransferQueueOutcome.queued) {
+      queued++;
+    } else {
+      outcome = result;
+    }
+  }
+  return BatchDownloadResult(queued, outcome);
+}
+
 /// Queues a download of [file] into this app's staging area.
 /// 把 [file] 的下载排入本应用的暂存区。
 ///

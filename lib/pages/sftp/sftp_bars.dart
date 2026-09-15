@@ -118,12 +118,29 @@ class SftpBreadcrumbBar extends StatelessWidget {
   }
 }
 
-/// Bottom bar shown while entries are selected: the count and the batch action.
+/// Bottom bar shown while entries are selected: the count and the batch actions.
 /// 有条目被选中时显示的底栏：选中数量与批量操作。
 class SftpSelectionBar extends StatelessWidget {
   /// How many entries are ticked.
   /// 已勾选的条目数量。
   final int selectedCount;
+
+  /// How many of them are files — everything a batch download can carry.
+  /// 其中有多少是文件——批量下载能承载的全部。
+  ///
+  /// It is passed in rather than derived, because only the page knows which
+  /// entries the ticked paths point at. A directory is not part of a batch
+  /// download: the queue moves one remote path to one local path and walks
+  /// nothing, so the button states how many files it will queue instead of
+  /// promising the whole selection.
+  /// 它由外部传入而不是自行推导，因为只有页面知道已勾选的路径指向哪些条目。目录不属于批量
+  /// 下载：队列只把一条远程路径搬到一条本地路径，不做任何遍历，因此按钮说出它将入队多少个
+  /// 文件，而不是承诺整个选择集。
+  final int fileCount;
+
+  /// Running the batch download.
+  /// 执行批量下载。
+  final VoidCallback onDownload;
 
   /// Running the batch delete.
   /// 执行批量删除。
@@ -136,6 +153,8 @@ class SftpSelectionBar extends StatelessWidget {
   const SftpSelectionBar({
     super.key,
     required this.selectedCount,
+    required this.fileCount,
+    required this.onDownload,
     required this.onDelete,
     required this.onCancel,
   });
@@ -144,6 +163,12 @@ class SftpSelectionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final dividerColor = Theme.of(context).dividerColor;
+    // The same weight a Material button's own disabled label gets, so an
+    // unavailable action reads as unavailable rather than as a different colour
+    // this bar invented.
+    // 与 Material 按钮自身禁用标签相同的分量，使不可用的操作读起来就是不可用，而不是本栏
+    // 自己发明的一种颜色。
+    final disabledColor = cs.onSurface.withValues(alpha: 0.38);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -172,6 +197,37 @@ class SftpSelectionBar extends StatelessWidget {
               spacing: 8,
               runSpacing: 4,
               children: [
+                TextButton.icon(
+                  // A selection with no file in it is not a tap that does
+                  // nothing: the action is unavailable, and the disabled colour
+                  // says so before the user taps it rather than after.
+                  // 一个不含文件的选择集不该是一次「点了也没反应」的点击：该操作不可用，
+                  // 而禁用色让用户在点击之前、而不是之后就知道这一点。
+                  onPressed: fileCount == 0 ? null : onDownload,
+                  icon: Icon(
+                    Icons.download_outlined,
+                    color: fileCount == 0 ? disabledColor : cs.secondary,
+                    size: 18,
+                  ),
+                  label: Text(
+                    // The count is on the label at all times, not only when
+                    // something is left out: a number that appears and
+                    // disappears is one the user has to notice, while a number
+                    // that is always there is one they can check.
+                    // 计数始终带在标签上，而不是只在有东西被落下时才出现：一个忽隐忽现的
+                    // 数字需要用户去察觉，而一个一直在那里的数字是可以对照的。
+                    '${t('download')} ($fileCount)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: fileCount == 0 ? disabledColor : cs.secondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
                 TextButton.icon(
                   onPressed: onDelete,
                   icon: Icon(Icons.delete_outline, color: cs.error, size: 18),
