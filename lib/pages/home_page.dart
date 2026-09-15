@@ -7,15 +7,15 @@ import '../models/host.dart';
 import '../providers/providers.dart';
 import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
-import '../widgets/host_key_prompt.dart';
 import '../widgets/host_card.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
 import 'host_console_page.dart';
 import 'add_host_page.dart';
 
-/// Home screen showing the host list with online/offline sections.
-/// 显示主机列表的主页，按在线/离线分组。
+/// Home screen showing the host list, split by the three states a host can be
+/// in: online, unverified, offline.
+/// 显示主机列表的主页，按主机可能处于的三种状态分组：在线、待验证、离线。
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -139,13 +139,27 @@ class _HomePageState extends ConsumerState<HomePage> {
           try {
             final credential = credMap[host.credentialId];
             if (credential == null) {
+              // Nothing to connect with, so the probe never ran: it has no
+              // evidence either way and must not report the host as down.
+              // 没有可用的连接凭据，探测根本没有发起：它两边都没有证据，绝不能把
+              // 主机报成宕机。
               await ref
                   .read(hostListProvider.notifier)
-                  .setOnline(host.id, false);
+                  .setStatus(
+                    host.id,
+                    Host.statusForProbe(
+                      attempted: false,
+                      connected: false,
+                      trustRefused: false,
+                    ),
+                  );
               continue;
             }
 
             _probingHosts.add(host.id);
+            // Set from inside `onPrompt` below, read once the attempt is over.
+            // 由下面的 `onPrompt` 置位，在本次尝试结束后读取。
+            var trustRefused = false;
             // A probe is a full SSH session with the stored credential, so it
             // must verify the host key like every other connection: `dartssh2`
             // accepts any key when no callback is passed, which is exactly what
@@ -160,20 +174,25 @@ class _HomePageState extends ConsumerState<HomePage> {
                 db: db,
                 address: host.ipAddress,
                 port: host.port,
-                onPrompt: (fingerprint, verdict) async {
-                  // The probe runs after several awaits, so the page may already
-                  // be gone; with nobody left to ask, refusing is the only safe
-                  // answer. An accepted key is recorded, so a host is asked
-                  // about once, not on every round.
-                  // 探测在多次 await 之后执行，页面可能已经销毁；此时无人可问，
-                  // 拒绝是唯一安全答案。接受的密钥会被记录，因此同一台主机只会被
-                  // 询问一次，而不是每轮都问。
-                  if (!mounted) return false;
-                  return showHostKeyPrompt(
-                    context,
-                    fingerprint: fingerprint,
-                    verdict: verdict,
-                  );
+                // `onPrompt` fires exactly when the presented key is not
+                // trusted yet (see host_key_trust.dart) — the case that used to
+                // raise a modal prompt from a background probe. It must not: a
+                // dialog the user never asked for, once per untrusted host on
+                // every launch, is one they learn to dismiss on reflex, and
+                // then the one prompt that carries real signal — "this host's
+                // key CHANGED" — is dismissed with the rest. Refusing silently
+                // keeps the trust decision where it belongs, in a connection
+                // the user asked for. Refusing stores nothing, so the host
+                // stays untrusted and later rounds re-refuse just as silently.
+                // `onPrompt` 恰在呈现的密钥尚未受信时触发（见 host_key_trust.dart）
+                // ——这正是过去会从后台探测弹出模态提示的情形。它绝不能这么做：
+                // 每次启动为每台未受信主机弹一个用户从未请求的对话框，只会让人条件
+                // 反射地关掉，而真正承载信号的那一次提示「此主机的密钥已变更」也会
+                // 被一并关掉。静默拒绝把信任决策留在它该在的地方——用户主动发起的
+                // 连接里。拒绝不写入任何记录，主机保持未受信，后续轮次同样静默重拒。
+                onPrompt: (_, _) async {
+                  trustRefused = true;
+                  return false;
                 },
               ),
             );
@@ -181,11 +200,25 @@ class _HomePageState extends ConsumerState<HomePage> {
               await conn.connect();
               await ref
                   .read(hostListProvider.notifier)
-                  .setOnline(host.id, conn.state == SshConnectionState.connected);
+                  .setStatus(
+                    host.id,
+                    Host.statusForProbe(
+                      attempted: true,
+                      connected: conn.state == SshConnectionState.connected,
+                      trustRefused: trustRefused,
+                    ),
+                  );
             } catch (_) {
               await ref
                   .read(hostListProvider.notifier)
-                  .setOnline(host.id, false);
+                  .setStatus(
+                    host.id,
+                    Host.statusForProbe(
+                      attempted: true,
+                      connected: false,
+                      trustRefused: trustRefused,
+                    ),
+                  );
             } finally {
               conn.dispose();
               _probingHosts.remove(host.id);
@@ -196,9 +229,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         }
       }
 
-      await Future.wait([
-        for (var i = 0; i < _probeConcurrency; i++) worker(),
-      ]);
+      await Future.wait([for (var i = 0; i < _probeConcurrency; i++) worker()]);
     } finally {
       _isProbing = false;
       _resumePendingProbe();
@@ -245,6 +276,14 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    // "Unknown" is not "down": the theme's error colour would assert an outage
+    // nothing established, so unverified hosts get a muted, non-alarming tone.
+    // Taken from the same helper the cards use, so the section header, its note
+    // and the cards below cannot drift apart.
+    // 「未知」不是「宕机」：主题的错误色会断言一次并无依据的故障，因此待验证的
+    // 主机使用柔和、不刺眼的色调。取自卡片所用的同一个辅助函数，分组标题、说明与
+    // 其下的卡片才不会各走各的。
+    final unverifiedColor = hostStatusColor(cs, HostStatus.unverified);
     final hostAsync = ref.watch(hostListProvider);
 
     return PopScope(
@@ -289,8 +328,20 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
           data: (hosts) {
             _scheduleStatusProbe(hosts);
-            final online = hosts.where((h) => h.isOnline).toList();
-            final offline = hosts.where((h) => !h.isOnline).toList();
+            // Three groups, because `HostStatus` has three values: folding
+            // "unverified" in with either neighbour is exactly the conflation
+            // the old boolean forced on this page.
+            // 三个分组，因为 `HostStatus` 有三个取值：把「待验证」并入任何一侧，
+            // 正是旧布尔字段强加给本页的混淆。
+            final online = hosts
+                .where((h) => h.status == HostStatus.online)
+                .toList();
+            final unverified = hosts
+                .where((h) => h.status == HostStatus.unverified)
+                .toList();
+            final offline = hosts
+                .where((h) => h.status == HostStatus.offline)
+                .toList();
 
             return RefreshIndicator(
               color: cs.primary,
@@ -301,21 +352,42 @@ class _HomePageState extends ConsumerState<HomePage> {
               child: ListView(
                 padding: const EdgeInsets.only(top: 12, bottom: 32),
                 children: [
-                  _buildOverview(context, hosts, online.length, offline.length),
+                  _buildOverview(
+                    context,
+                    hosts,
+                    online.length,
+                    unverified.length,
+                    offline.length,
+                  ),
                   if (online.isNotEmpty) ...[
                     AppSectionHeader(
                       title: t('online_hosts'),
                       trailing: '${online.length}',
                       color: cs.primary,
                     ),
-                    ...online.map(
-                      (host) => HostCard(
-                        host: host,
-                        onTap: () => _navigateToConsole(context, host),
-                        onLongPress: () => _showHostOptions(context, ref, host),
-                        onMore: () => _showHostOptions(context, ref, host),
-                      ),
+                    ...online.map(_buildHostCard),
+                  ],
+                  // Unverified hosts get their own section between the two.
+                  // They are neither usable-as-confirmed nor known to be down:
+                  // filing them under "Offline" would state an outage nobody
+                  // measured, which is how a user learns that a red section
+                  // means nothing — and then misses the one that does.
+                  // Their group is also the one the user can act on: opening
+                  // the host is what turns it into online or offline.
+                  // 待验证的主机在两个分组之间单列。它们既不是「可用且已确认」，
+                  // 也不是「确知宕机」：归入「离线」等于宣称一次无人测量过的故障，
+                  // 那正是用户学会「红色分组不代表什么」的途径，之后连有意义的那次
+                  // 也会被忽略。这个分组也恰恰是用户可以行动的一组：打开主机即可让
+                  // 它变成在线或离线。
+                  if (unverified.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    AppSectionHeader(
+                      title: t('host_status_unverified'),
+                      trailing: '${unverified.length}',
+                      color: unverifiedColor,
                     ),
+                    _UnverifiedNote(color: unverifiedColor),
+                    ...unverified.map(_buildHostCard),
                   ],
                   if (offline.isNotEmpty) ...[
                     const SizedBox(height: 8),
@@ -324,14 +396,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       trailing: '${offline.length}',
                       color: cs.error,
                     ),
-                    ...offline.map(
-                      (host) => HostCard(
-                        host: host,
-                        onTap: () => _navigateToConsole(context, host),
-                        onLongPress: () => _showHostOptions(context, ref, host),
-                        onMore: () => _showHostOptions(context, ref, host),
-                      ),
-                    ),
+                    ...offline.map(_buildHostCard),
                   ],
                   if (hosts.isEmpty) _buildEmptyState(context, cs),
                 ],
@@ -343,38 +408,80 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  /// Builds the card for [host], wiring up the interactions the list offers.
+  /// 构建 [host] 的卡片，接上列表提供的各项交互。
+  Widget _buildHostCard(Host host) => HostCard(
+    host: host,
+    onTap: () => _navigateToConsole(context, host),
+    onLongPress: () => _showHostOptions(context, ref, host),
+    onMore: () => _showHostOptions(context, ref, host),
+  );
+
   Widget _buildOverview(
     BuildContext context,
     List<Host> hosts,
     int onlineCount,
+    int unverifiedCount,
     int offlineCount,
   ) {
     final cs = Theme.of(context).colorScheme;
     final total = hosts.length;
+    // Two rows of two, not one row of four. All three states plus the total have
+    // to be readable at once, and at 360dp a four-across row squeezes each
+    // label to roughly two thirds of what "Unverified" or "Не подтверждён"
+    // needs — they would ellipsise, and a summary that hides its labels is not
+    // a summary. The counts must also visibly add up: a total that does not
+    // equal its parts reads as a broken screen, which is exactly what the
+    // three-item version did whenever a host was unverified, i.e. on every
+    // first launch.
+    // 两行两列而不是一行四个。三种状态加总数必须同时可读：在 360dp 上排成一行会把每个
+    // 标签压到 "Unverified" 或 "Не подтверждён" 所需宽度的约三分之二，它们会被省略号
+    // 截断，而藏起标签的摘要就不成其为摘要。数字还必须一眼看得出能对上：总数与各部分不等
+    // 的摘要卡看起来就是坏掉的，而这正是三格版本在有主机未验证时的表现——也就是每次首次
+    // 启动都会如此。
+    //
+    // Labels and colours come from the same helpers the host cards use, so the
+    // header and the rows below it cannot drift apart.
+    // 文案与配色取自主机卡片所用的同一组 helper，因此顶部摘要与下方列表不会各说各话。
     return AppCard(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      child: Row(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      child: Column(
         children: [
-          _OverviewItem(
-            label: t('total'),
-            value: '$total',
-            color: cs.secondary,
-            icon: Icons.dns_outlined,
+          Row(
+            children: [
+              _OverviewItem(
+                label: t('total'),
+                value: '$total',
+                color: cs.secondary,
+                icon: Icons.dns_outlined,
+              ),
+              _OverviewDivider(),
+              _OverviewItem(
+                label: hostStatusLabel(HostStatus.online),
+                value: '$onlineCount',
+                color: hostStatusColor(cs, HostStatus.online),
+                icon: Icons.check_circle_outline,
+              ),
+            ],
           ),
-          _OverviewDivider(),
-          _OverviewItem(
-            label: t('running'),
-            value: '$onlineCount',
-            color: cs.primary,
-            icon: Icons.check_circle_outline,
-          ),
-          _OverviewDivider(),
-          _OverviewItem(
-            label: t('offline_status'),
-            value: '$offlineCount',
-            color: cs.error,
-            icon: Icons.link_off,
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _OverviewItem(
+                label: hostStatusLabel(HostStatus.unverified),
+                value: '$unverifiedCount',
+                color: hostStatusColor(cs, HostStatus.unverified),
+                icon: Icons.help_outline,
+              ),
+              _OverviewDivider(),
+              _OverviewItem(
+                label: hostStatusLabel(HostStatus.offline),
+                value: '$offlineCount',
+                color: hostStatusColor(cs, HostStatus.offline),
+                icon: Icons.link_off,
+              ),
+            ],
           ),
         ],
       ),
@@ -546,6 +653,29 @@ class _HostActionRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// One-line explanation shown under the "unverified" section header, so the
+/// state reads as "we have not checked this host yet" rather than as a failure.
+/// 「待验证」分组标题下的一行说明，让该状态读起来是「我们还没核对过这台主机」
+/// 而不是一次故障。
+class _UnverifiedNote extends StatelessWidget {
+  /// Colour matching the section header and the cards below it.
+  /// 与该分组标题及其下卡片一致的颜色。
+  final Color color;
+
+  const _UnverifiedNote({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+      child: Text(
+        t('host_status_unverified_hint'),
+        style: TextStyle(color: color, fontSize: 11.5, height: 1.35),
       ),
     );
   }

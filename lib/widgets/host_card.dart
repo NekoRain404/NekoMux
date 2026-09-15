@@ -3,8 +3,32 @@ import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import 'app_ui.dart';
 
-/// A card widget displaying a server host's online status, alias, address, OS logo, and a chevron.
-/// 服务器主机卡片组件，显示在线状态、别名、地址、操作系统标志和右箭头。
+/// Colour for a reachability state, for the theme in [cs].
+/// 在 [cs] 主题下，某个可达性状态对应的颜色。
+///
+/// [HostStatus.unverified] deliberately gets a muted, neutral tone instead of
+/// the theme's error colour: such a host is one whose state we could not
+/// determine — its key is untrusted, so we refused the handshake — not one
+/// known to be down. Red has to keep meaning "down" if it is to mean anything.
+/// [HostStatus.unverified] 刻意使用柔和中性的色调，而非主题的错误色：这类主机是
+/// 我们无法判定状态的主机——其密钥未受信，因此我们拒绝握手——而不是确知宕机的主机。
+/// 红色必须继续表示「宕机」，否则它就不再表示任何东西。
+Color hostStatusColor(ColorScheme cs, HostStatus status) => switch (status) {
+  HostStatus.online => cs.primary,
+  HostStatus.unverified => cs.onSurface.withValues(alpha: 0.5),
+  HostStatus.offline => cs.error,
+};
+
+/// Badge label for a reachability state, from the existing translation keys.
+/// 某可达性状态对应的徽标文案，取自现有翻译键。
+String hostStatusLabel(HostStatus status) => switch (status) {
+  HostStatus.online => t('running'),
+  HostStatus.unverified => t('host_status_unverified'),
+  HostStatus.offline => t('offline_status'),
+};
+
+/// A card widget displaying a server host's reachability status, alias, address, OS logo, and a chevron.
+/// 服务器主机卡片组件，显示可达性状态、别名、地址、操作系统标志和右箭头。
 class HostCard extends StatelessWidget {
   final Host host;
   final VoidCallback? onTap;
@@ -23,7 +47,7 @@ class HostCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final statusColor = host.isOnline ? colorScheme.primary : colorScheme.error;
+    final statusColor = hostStatusColor(colorScheme, host.status);
 
     return AppCard(
       onTap: onTap,
@@ -81,7 +105,7 @@ class HostCard extends StatelessWidget {
                   runSpacing: 4,
                   children: [
                     AppBadge(
-                      label: host.isOnline ? t('running') : t('offline_status'),
+                      label: hostStatusLabel(host.status),
                       color: statusColor,
                     ),
                     AppBadge(

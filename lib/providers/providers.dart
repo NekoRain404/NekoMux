@@ -170,42 +170,54 @@ class HostListNotifier extends AsyncNotifier<List<Host>> {
     ref.invalidateSelf();
   }
 
-  /// Mark a host as online or offline, updating state without a DB round-trip.
-  /// 将主机标记为在线或离线，直接更新状态而不访问数据库。
+  /// Set a host's reachability [status], updating state without a DB round-trip.
+  /// 设置主机的可达性 [status]，直接更新状态而不访问数据库。
   ///
   /// The write is a no-op — no new list, no listener notification — when the
   /// value already matches or the id is unknown. `AsyncValue` compares its
   /// payload with `==`, and `List` compares by identity, so publishing a fresh
   /// list for an unchanged status makes every listener rebuild; callers such as
   /// the reachability probe call this repeatedly with the same result, which
-  /// used to keep the UI rebuilding forever.
+  /// used to keep the UI rebuilding forever. That matters for the probe's
+  /// silent re-refusal too: an untrusted host is written [HostStatus.unverified]
+  /// on every round, and each of those rounds has to stay invisible.
   /// 当取值已一致或 id 不存在时，本次写入为空操作：不新建列表，也不通知监听者。
   /// `AsyncValue` 以 `==` 比较其内容，而 `List` 按同一性比较，因此为未变化的
   /// 状态发布新列表会让所有监听者重建；可达性探测等调用方会反复写入相同结果，
-  /// 这曾导致界面无休止地重建。
-  Future<void> setOnline(String id, bool online) async {
+  /// 这曾导致界面无休止地重建。探测的静默重拒绝同样依赖这一点：未受信的主机每轮
+  /// 都会被写入 [HostStatus.unverified]，而这些轮次必须全都不可见。
+  Future<void> setStatus(String id, HostStatus status) async {
     final current = state.value;
     if (current == null) return;
 
-    // `Host.isOnline` is a mutable field, so read it before writing: only a
+    // `Host.status` is a mutable field, so read it before writing: only a
     // genuine transition may notify.
-    // `Host.isOnline` 是可变字段，必须先读后写：只有真实的状态跃迁才通知。
+    // `Host.status` 是可变字段，必须先读后写：只有真实的状态跃迁才通知。
     bool known = false;
     for (final host in current) {
       if (host.id != id) continue;
       known = true;
-      if (host.isOnline == online) return;
+      if (host.status == status) return;
       break;
     }
     if (!known) return;
 
     for (final host in current) {
-      if (host.id == id) host.isOnline = online;
+      if (host.id == id) host.status = status;
     }
     // A new list instance is what makes the real transition reach listeners.
     // 新列表实例正是真实状态跃迁能送达监听者的原因。
     state = AsyncData(List<Host>.of(current));
   }
+
+  /// Two-state shorthand for [setStatus], for callers that just observed a
+  /// connection succeed or fail — a real measurement, so `false` means
+  /// [HostStatus.offline] and not the unknown [HostStatus.unverified].
+  /// [setStatus] 的两态简写，供刚刚观测到连接成功或失败的调用方使用——那是真实
+  /// 的测量结果，因此 `false` 表示 [HostStatus.offline]，而不是表示未知的
+  /// [HostStatus.unverified]。
+  Future<void> setOnline(String id, bool online) =>
+      setStatus(id, online ? HostStatus.online : HostStatus.offline);
 }
 
 // ---- Snippets / 代码片段 ----

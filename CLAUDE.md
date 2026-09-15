@@ -20,23 +20,24 @@ tested in isolation should get a test.
 future APKs cannot update installed releases. Before any `git add -A`, confirm
 with `git status --ignored` that they are still ignored.
 
-## Current size violations
+## Size
 
-Tracked here so the constraint does not silently rot. As of 2026-09-15:
+**Every file under `lib/` is currently under the 800-line limit.** Keep it that
+way — when a file approaches it, move a coherent unit out before adding more
+(an extracted service, widget, or set of pure helpers), rather than shaving
+lines.
 
-| File | Lines | Suggested split |
-| --- | --- | --- |
-| `lib/pages/container_shell_page.dart` | 1048 | Docker command layer; container list; log viewer |
-| `lib/pages/settings_page.dart` | 1044 | Backup/restore into `backup_service.dart`; appearance; data management |
-| `lib/pages/host_console_page.dart` | 870 | Monitoring into a `hostMonitorProvider` |
+Three files were brought under it in the 2026-09-15 audit remediation, and are
+the models to follow:
 
-Brought under the limit already: `lib/core/i18n/strings.dart` (3530 → 272, with
-one file per language under `data/`) and `lib/pages/sftp_page.dart`
-(1182 → 630, split into `lib/pages/sftp/`). Use them as the model — move a
-coherent unit out, do not shave lines.
+| File | Was | Now | How |
+| --- | --- | --- | --- |
+| `lib/core/i18n/strings.dart` | 3530 | 272 | one file per language under `data/` |
+| `lib/pages/sftp_page.dart` | 1182 | 630 | split into `lib/pages/sftp/` |
+| `lib/pages/settings_page.dart` | 1044 | 371 | split into `lib/pages/settings/` |
 
-`lib/pages/systemd_page.dart` (731) is closest to the limit — check before
-adding to it.
+The same treatment was applied to `container_shell_page.dart` (into
+`lib/pages/containers/`) and `host_console_page.dart` (into `lib/pages/console/`).
 
 ## Architecture
 
