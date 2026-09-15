@@ -26,14 +26,17 @@ Tracked here so the constraint does not silently rot. As of 2026-09-15:
 
 | File | Lines | Suggested split |
 | --- | --- | --- |
-| `lib/core/i18n/strings.dart` | 3465 | One file per language; it is a pure data table with 8 languages |
-| `lib/pages/sftp_page.dart` | 1182 | Path/breadcrumb logic; selection + batch actions; file dialogs |
-| `lib/pages/settings_page.dart` | 1041 | Backup/restore into `backup_service.dart`; appearance; data management |
-| `lib/pages/container_shell_page.dart` | 1019 | Docker command layer; container list; log viewer |
-| `lib/pages/host_console_page.dart` | 843 | Monitoring into a `hostMonitorProvider` |
+| `lib/pages/container_shell_page.dart` | 1048 | Docker command layer; container list; log viewer |
+| `lib/pages/settings_page.dart` | 1044 | Backup/restore into `backup_service.dart`; appearance; data management |
+| `lib/pages/host_console_page.dart` | 870 | Monitoring into a `hostMonitorProvider` |
 
-`lib/pages/wireless_adb_page.dart` (789) and `lib/pages/systemd_page.dart` (731)
-are close to the limit — check before adding to them.
+Brought under the limit already: `lib/core/i18n/strings.dart` (3530 → 272, with
+one file per language under `data/`) and `lib/pages/sftp_page.dart`
+(1182 → 630, split into `lib/pages/sftp/`). Use them as the model — move a
+coherent unit out, do not shave lines.
+
+`lib/pages/systemd_page.dart` (731) is closest to the limit — check before
+adding to it.
 
 ## Architecture
 

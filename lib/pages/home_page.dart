@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
+import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
+import '../widgets/host_key_prompt.dart';
 import '../widgets/host_card.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
@@ -116,6 +118,11 @@ class _HomePageState extends ConsumerState<HomePage> {
       final credentials = await ref.read(credentialListProvider.future);
       final credMap = {for (final c in credentials) c.id: c};
 
+      // One lookup per round is enough: every host's verifier reads the same
+      // known-hosts table.
+      // 每轮取一次即可：所有主机的校验器读的是同一张 known_hosts 表。
+      final db = await ref.read(databaseProvider.future);
+
       final queue = <Host>[
         for (final host in hosts)
           if (!_probingHosts.contains(host.id)) host,
@@ -139,10 +146,36 @@ class _HomePageState extends ConsumerState<HomePage> {
             }
 
             _probingHosts.add(host.id);
+            // A probe is a full SSH session with the stored credential, so it
+            // must verify the host key like every other connection: `dartssh2`
+            // accepts any key when no callback is passed, which is exactly what
+            // a machine-in-the-middle needs.
+            // 探测同样是一次带真实凭据的完整 SSH 会话，必须和其它连接一样校验
+            // 主机密钥：不传回调时 `dartssh2` 会接受任意密钥，这正是中间人想要的。
             final conn = SshConnection(
               host: host,
               credential: credential,
               connectTimeout: _probeConnectTimeout,
+              onHostKeyVerify: buildHostKeyVerifier(
+                db: db,
+                address: host.ipAddress,
+                port: host.port,
+                onPrompt: (fingerprint, verdict) async {
+                  // The probe runs after several awaits, so the page may already
+                  // be gone; with nobody left to ask, refusing is the only safe
+                  // answer. An accepted key is recorded, so a host is asked
+                  // about once, not on every round.
+                  // 探测在多次 await 之后执行，页面可能已经销毁；此时无人可问，
+                  // 拒绝是唯一安全答案。接受的密钥会被记录，因此同一台主机只会被
+                  // 询问一次，而不是每轮都问。
+                  if (!mounted) return false;
+                  return showHostKeyPrompt(
+                    context,
+                    fingerprint: fingerprint,
+                    verdict: verdict,
+                  );
+                },
+              ),
             );
             try {
               await conn.connect();

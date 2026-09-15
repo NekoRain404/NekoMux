@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
+import '../services/host_key_trust.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
+import '../widgets/host_key_prompt.dart';
 
 class SystemdPage extends ConsumerStatefulWidget {
   final Host host;
@@ -66,7 +68,34 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
       }
       if (_conn == null || _conn!.state != SshConnectionState.connected) {
         _conn?.dispose();
-        _conn = SshConnection(host: host, credential: cred);
+
+        // The service-manager connection is a real SSH session, so it has to
+        // verify the host key like every other one: `dartssh2` accepts any key
+        // when no callback is passed, which is exactly what a machine-in-the-
+        // middle needs.
+        // 服务管理连接是真实的 SSH 会话，必须和其它连接一样校验主机密钥：
+        // 不传回调时 `dartssh2` 会接受任意密钥，这正是中间人想要的。
+        final db = await ref.read(databaseProvider.future);
+        _conn = SshConnection(
+          host: host,
+          credential: cred,
+          onHostKeyVerify: buildHostKeyVerifier(
+            db: db,
+            address: host.ipAddress,
+            port: host.port,
+            onPrompt: (fingerprint, verdict) async {
+              // Runs after several awaits, so the page may already be gone; with
+              // nobody left to ask, refusing is the only safe answer.
+              // 该回调在多次 await 之后执行，页面可能已经销毁；此时无人可问，拒绝是唯一安全答案。
+              if (!mounted) return false;
+              return showHostKeyPrompt(
+                context,
+                fingerprint: fingerprint,
+                verdict: verdict,
+              );
+            },
+          ),
+        );
         await _conn!.connect();
         if (_conn!.state != SshConnectionState.connected) {
           setState(() {

@@ -7,8 +7,10 @@ import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../models/credential.dart';
 import '../providers/providers.dart';
+import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
+import '../widgets/host_key_prompt.dart';
 
 /// Real Docker container management page using SSH-based Docker commands.
 /// 基于 SSH 执行真实 Docker 命令的容器管理页面。
@@ -76,7 +78,34 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
       /// Dispose any existing connection before creating a new one.
       /// 在创建新连接之前释放任何现有连接。
       _ssh?.dispose();
-      _ssh = SshConnection(host: widget.host, credential: _credential!);
+
+      /// The container connection is a real SSH session, so it has to verify the
+      /// host key like every other one: `dartssh2` accepts any key when no
+      /// callback is passed, which is exactly what a machine-in-the-middle
+      /// needs.
+      /// 容器管理连接是真实的 SSH 会话，必须和其它连接一样校验主机密钥：
+      /// 不传回调时 `dartssh2` 会接受任意密钥，这正是中间人想要的。
+      final db = await ref.read(databaseProvider.future);
+      _ssh = SshConnection(
+        host: widget.host,
+        credential: _credential!,
+        onHostKeyVerify: buildHostKeyVerifier(
+          db: db,
+          address: widget.host.ipAddress,
+          port: widget.host.port,
+          onPrompt: (fingerprint, verdict) async {
+            /// Runs after several awaits, so the page may already be gone; with
+            /// nobody left to ask, refusing is the only safe answer.
+            /// 该回调在多次 await 之后执行，页面可能已经销毁；此时无人可问，拒绝是唯一安全答案。
+            if (!mounted) return false;
+            return showHostKeyPrompt(
+              context,
+              fingerprint: fingerprint,
+              verdict: verdict,
+            );
+          },
+        ),
+      );
       await _ssh!.connect();
 
       if (_ssh!.state != SshConnectionState.connected) {

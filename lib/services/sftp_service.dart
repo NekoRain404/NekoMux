@@ -28,6 +28,17 @@ class SftpService {
   /// 当前活动的 SFTP 客户端会话。
   SftpClient? _sftp;
 
+  /// Epoch of the current connect attempt.
+  /// Bumped when an attempt starts, and by [disconnect] to invalidate an
+  /// attempt that is still suspended on an `await`. Its continuation re-checks
+  /// the epoch and, when it no longer matches, closes whatever it just created
+  /// instead of publishing it.
+  /// 当前连接尝试的世代号。
+  /// 新尝试开始时自增，[disconnect] 也会自增，用于作废仍挂起在 `await` 上的
+  /// 尝试；其后续代码会发现世代号不再匹配，从而关闭刚创建的资源，而不是把它
+  /// 发布出去。
+  int _connectEpoch = 0;
+
   /// Optional host key verification callback.
   final Future<bool> Function(String fingerprint)? onHostKeyVerify;
 
@@ -41,14 +52,43 @@ class SftpService {
 
   /// Open SSH connection, authenticate, then open SFTP session.
   /// 打开 SSH 连接、认证，然后打开 SFTP 会话。
+  ///
+  /// Abortable: [disconnect] invalidates a connect that is still in flight, and
+  /// every continuation below re-checks that after each `await`, so a teardown
+  /// that lands mid-flight can never be outraced into publishing a live client
+  /// or SFTP session.
+  /// 可中止：[disconnect] 会作废仍在进行中的连接；下面每个 `await` 之后都会
+  /// 重新检查，因此中途发生的清理操作不可能被反超而留下存活的客户端或 SFTP 会话。
   Future<void> connect() async {
+    final epoch = ++_connectEpoch;
+
+    // The resources this attempt creates are tracked in locals as well:
+    // a concurrent [disconnect] clears the fields, and a newer attempt may own
+    // them by now, so cleanup here must never go through the fields.
+    // 本次尝试创建的资源同时用局部变量跟踪：并发的 [disconnect] 会清空字段，
+    // 更新的尝试此刻也可能已占用它们，因此这里的清理绝不能经由字段进行。
+    SSHSocket? socket;
+    SSHClient? client;
+    SftpClient? sftp;
+
     try {
-      final socket = await SSHSocket.connect(
+      socket = await SSHSocket.connect(
         host.ipAddress,
         host.port,
         timeout: const Duration(seconds: 10),
       );
-      _client = SSHClient(
+
+      // Torn down while the TCP handshake was pending. This socket is all the
+      // attempt owns and nothing else holds a reference to it, so it must be
+      // destroyed here or it stays connected forever.
+      // TCP 握手期间被清理。这个套接字是本次尝试唯一的产物，没有其他引用持有它，
+      // 不在这里销毁就会一直保持连接。
+      if (_isAbandoned(epoch)) {
+        _abandonConnecting(socket: socket);
+        return;
+      }
+
+      client = SSHClient(
         socket,
         username: credential.username,
         onPasswordRequest: credential.authType == 0
@@ -64,9 +104,57 @@ class SftpService {
               }
             : null,
       );
-      await _client!.authenticated;
-      _sftp = await _client!.sftp();
+
+      // Publish the client before awaiting so that [disconnect] can reach it and
+      // abort the handshake, instead of walking past it and leaving a live,
+      // authenticated client behind.
+      // 在等待前先发布客户端，好让 [disconnect] 能拿到它并中止握手，
+      // 而不是错过它、留下一个仍然存活且已完成认证的客户端。
+      _client = client;
+
+      await client.authenticated;
+
+      // Torn down during authentication — possibly while a host-key dialog was
+      // still on screen. [disconnect] has already closed `client`; closing it
+      // again here is a backstop, and the guards below tolerate that.
+      // 认证期间被清理——当时可能还开着主机密钥对话框。[disconnect] 已经关闭过
+      // `client`；这里再关一次作为兜底，由下面的守护语句容忍重复关闭。
+      if (_isAbandoned(epoch)) {
+        _abandonConnecting(client: client);
+        return;
+      }
+
+      sftp = await client.sftp();
+
+      // Torn down while the SFTP subsystem was being opened. The subsystem
+      // already exists on the server by now and `sftp` is the only reference to
+      // it — the invalidating call could not have closed it, because the field
+      // was still null at the time.
+      // 打开 SFTP 子系统期间被清理。此时服务器上的子系统已经存在，而 `sftp` 是
+      // 它唯一的引用——作废调用当时看到字段仍为 null，无法关闭它。
+      if (_isAbandoned(epoch)) {
+        _abandonConnecting(sftp: sftp, client: client);
+        return;
+      }
+
+      // There is no `await` between the check above and this line, so a
+      // teardown cannot slip in between: either we reach this point first (and
+      // the teardown finds a published session it can close), or the check
+      // above already returned.
+      // 上面的检查与本行之间没有 `await`，清理操作不可能插进来：
+      // 要么我们先到达（清理操作会看到一个已发布、可被关闭的会话），
+      // 要么上面的检查已经返回。
+      _sftp = sftp;
     } catch (e) {
+      // A failure caused by our own teardown is not a connection error: close
+      // whatever this attempt created and stay silent, rather than reporting an
+      // error to a caller that has already moved on.
+      // 由我们自己的清理动作引发的失败不是连接错误：关闭本次尝试创建的资源并保持
+      // 安静，而不是向一个已经走开的调用方上报错误。
+      if (_isAbandoned(epoch)) {
+        _abandonConnecting(socket: socket, client: client, sftp: sftp);
+        return;
+      }
       await _cleanup();
       throw SftpException(_translateError(e.toString()));
     }
@@ -184,7 +272,18 @@ class SftpService {
 
   /// Gracefully close the SFTP session and underlying SSH connection.
   /// 优雅地关闭 SFTP 会话和底层 SSH 连接。
-  Future<void> disconnect() async => _cleanup();
+  ///
+  /// Also aborts a [connect] that is still in flight: without the epoch bump a
+  /// teardown landing mid-connect would walk past fields that are still null,
+  /// and the connect continuation would then publish an authenticated client
+  /// and an SFTP subsystem that no one is left to close.
+  /// 同时中止仍在进行中的 [connect]：若不递增世代号，中途发生的清理只会看到仍为
+  /// null 的字段，随后连接流程就会发布一个已认证的客户端和 SFTP 子系统，
+  /// 而再没有对象负责关闭它们。
+  Future<void> disconnect() async {
+    _connectEpoch++;
+    await _cleanup();
+  }
 
   // ---- private helpers / 私有辅助方法 ----
 
@@ -196,15 +295,78 @@ class SftpService {
     }
   }
 
+  /// Whether the connect attempt identified by [epoch] was invalidated by a
+  /// [disconnect] that landed while it was suspended on an `await`.
+  /// 由 [epoch] 标识的连接尝试是否在其挂起期间被 [disconnect] 作废。
+  bool _isAbandoned(int epoch) => epoch != _connectEpoch;
+
+  /// Tears down the resources created by a connect attempt that was invalidated
+  /// while suspended on an `await` (see [_isAbandoned]).
+  /// 清理在 `await` 挂起期间被作废的连接尝试所创建的资源（见 [_isAbandoned]）。
+  ///
+  /// Only the references passed in are touched: `_sftp` / `_client` are
+  /// deliberately left alone, because [disconnect] has already cleared them and
+  /// a newer attempt may own them by now.
+  /// 只关闭传入的引用；刻意不碰 `_sftp` / `_client`，因为 [disconnect] 已经清空了
+  /// 它们，此刻也可能已被更新的尝试占用。
+  ///
+  /// Each step is guarded on its own: once the transport is closed, closing an
+  /// SFTP channel or a client throws (SftpClient.close() completes an
+  /// already-completed completer, SSHClient.close() can raise
+  /// `SSHStateError('Transport is closed')`), and that must not keep the
+  /// remaining resources open.
+  /// 每一步单独守护：传输层关闭后再关闭 SFTP 通道或客户端会抛出异常
+  /// （SftpClient.close() 会去完成一个已经完成的 completer，SSHClient.close()
+  /// 可能抛出 `SSHStateError('Transport is closed')`），不能因此让其余资源继续
+  /// 泄漏。
+  void _abandonConnecting({
+    SSHSocket? socket,
+    SSHClient? client,
+    SftpClient? sftp,
+  }) {
+    try {
+      sftp?.close();
+    } catch (_) {
+      // Channel already gone / 通道已不存在。
+    }
+    try {
+      client?.close();
+    } catch (_) {
+      // Transport already gone / 传输层已不存在。
+    }
+    // Unlike `close()`, `destroy()` is synchronous, idempotent and does not
+    // throw, so it leaves no future behind. Destroying a socket whose transport
+    // is already gone is a no-op.
+    // 与 `close()` 不同，`destroy()` 是同步、幂等且不抛异常的，不会留下 future。
+    // 对传输层已经消失的套接字调用它不会有任何副作用。
+    socket?.destroy();
+  }
+
   /// Close SFTP and SSH clients, swallowing exceptions.
   /// 关闭 SFTP 和 SSH 客户端，忽略异常。
+  ///
+  /// The two closes are guarded separately on purpose: a throw from the SFTP
+  /// close must not skip the client close. Both are attempted even when one
+  /// objects that its channel is already gone.
+  /// 两次关闭刻意各自守护：关闭 SFTP 时抛出的异常不能让客户端的关闭被跳过。
+  /// 即使其中一方抱怨通道已不存在，另一方仍会被关闭。
+  ///
+  /// The fields are cleared before this method returns (it contains no `await`,
+  /// so the whole body runs synchronously), which makes repeated calls — one
+  /// from [disconnect] and one from a failed [connect] — harmless no-ops.
+  /// 本方法返回前会清空字段（方法体中没有 `await`，整体同步执行），因此重复调用
+  /// （一次来自 [disconnect]，一次来自失败的 [connect]）是无副作用的空操作。
   Future<void> _cleanup() async {
     try {
       _sftp?.close();
-    } catch (_) {}
+    } catch (_) {
+      // SFTP channel already gone / SFTP 通道已不存在。
+    }
     try {
       _client?.close();
-    } catch (_) {}
+    } catch (_) {
+      // Transport already gone / 传输层已不存在。
+    }
     _sftp = null;
     _client = null;
   }

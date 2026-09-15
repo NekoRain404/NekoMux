@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import '../models/host.dart';
 import '../models/credential.dart';
+import 'command_result.dart';
 import 'host_key_verifier.dart';
 
 /// SSH connection lifecycle states.
@@ -84,13 +85,40 @@ class SshConnection {
   String? _lastError;
   String? get lastError => _lastError;
 
-  /// Execute a single command on the remote host via a separate exec channel,
-  /// collect all stdout, and return it as a string.
+  /// Execute a single command on the remote host via a separate exec channel
+  /// and report its output *and* its exit status.
   /// Does NOT interfere with the persistent shell session.
-  /// 通过独立的 exec 通道在远程主机上执行单个命令，
-  /// 收集所有 stdout 并以字符串形式返回。
+  /// 通过独立的 exec 通道在远程主机上执行单个命令，并同时返回输出与退出状态。
   /// 不会干扰持久化的 shell 会话。
-  Future<String> executeCommand(String command) async {
+  ///
+  /// Prefer this over [executeCommand]: the exit status is the only reliable
+  /// signal of whether the remote command actually did what it was asked, and
+  /// [executeCommand] throws it away. See [CommandResult.ok] — in particular,
+  /// a server that reports no status yields `ok == false` rather than a
+  /// success that was never confirmed.
+  /// 优先使用本方法而非 [executeCommand]：退出状态是判断远端命令是否真正完成的
+  /// 唯一可靠依据，而 [executeCommand] 把它丢弃了。见 [CommandResult.ok]——
+  /// 尤其是服务端不上报状态时返回 `ok == false`，而不是一个未经确认的成功。
+  ///
+  /// Draining order matters and is deliberate: `SSHSession.done` completes when
+  /// the *channel* closes, and its documentation warns that "more data may
+  /// still be available on the stdout and stderr streams at this time"
+  /// (`ssh_session.dart`). The two `join()`s are therefore started *before*
+  /// `done` is awaited — they consume as data arrives instead of after the
+  /// channel is gone — and only awaited afterwards, so nothing that lands in
+  /// the same turn as the channel close can be dropped. Starting the drains
+  /// also keeps the remote window from filling up, so a command that produces
+  /// megabytes of output cannot deadlock against us; and because `join()`
+  /// completes when the stream *closes*, a command with no stdout at all still
+  /// finishes instead of waiting for output that will never come.
+  /// 排空顺序是有意为之：`SSHSession.done` 在**通道**关闭时完成，其文档明确提醒
+  /// “此时 stdout / stderr 上可能仍有数据可读”。因此两次 `join()` 在 `await
+  /// session.done` **之前**就已启动——它们随数据到达即时消费，而不是等通道消失后
+  /// 才开始——之后才被 await，与通道关闭同批次抵达的数据因此不会丢失。提前启动
+  /// 消费同时避免远端发送窗口被填满，使产生大量输出的命令不会与我们互相死锁；
+  /// 又因为 `join()` 在流**关闭**时完成，完全没有 stdout 的命令也照样结束，
+  /// 不会去等待永远不会到来的输出。
+  Future<CommandResult> runCommand(String command) async {
     if (_client == null || _state != SshConnectionState.connected) {
       throw Exception('SSH 未连接');
     }
@@ -106,10 +134,32 @@ class SshConnection {
     await session.done;
     final out = await outputFuture;
     final err = await errorFuture;
-    if (err.isEmpty) return out;
-    if (out.isEmpty) return err;
-    return '$out\n$err';
+    // Read after `done`: the exit-status request is dispatched before the
+    // channel-close message that completes `done`, so the status is in place
+    // here whenever the server sends one at all. `exitCode` stays null when it
+    // does not — see CommandResult.exitCode.
+    // 在 `done` 之后读取：退出状态请求先于使 `done` 完成的通道关闭消息被分发，
+    // 因此只要服务端上报过状态，这里就已经拿到了。未上报时 `exitCode` 保持
+    // null——见 CommandResult.exitCode。
+    return CommandResult(stdout: out, stderr: err, exitCode: session.exitCode);
   }
+
+  /// Execute a single command on the remote host via a separate exec channel,
+  /// collect its output, and return it as a single string.
+  /// Does NOT interfere with the persistent shell session.
+  /// 通过独立的 exec 通道在远程主机上执行单个命令，
+  /// 收集其输出并以单个字符串形式返回。
+  /// 不会干扰持久化的 shell 会话。
+  ///
+  /// Kept for its existing callers, and defined as [CommandResult.combined] of
+  /// [runCommand] so both paths can never drift apart. It reports no exit
+  /// status — use [runCommand] when success has to be judged rather than
+  /// printed.
+  /// 为既有调用方保留，并定义为 [runCommand] 的 [CommandResult.combined]，
+  /// 使两条路径不可能各自漂移。它不上报退出状态；需要判断成败（而非仅展示输出）
+  /// 时请用 [runCommand]。
+  Future<String> executeCommand(String command) async =>
+      (await runCommand(command)).combined;
 
   /// Optional host key verification callback.
   /// Receives a formatted fingerprint string (e.g. "SHA256:xxxx" or "MD5:xx:xx:...").
@@ -117,7 +167,29 @@ class SshConnection {
   /// 可选的主机密钥验证回调。
   /// 接收格式化的指纹字符串（如 "SHA256:xxxx" 或 "MD5:xx:xx:..."）。
   /// 返回 true 表示接受主机密钥并继续；false 则中止连接。
+  ///
+  /// The key *type* ("ssh-ed25519", "ssh-rsa", ...) is not passed here; use
+  /// [onHostKeyVerifyTyped] when it has to be recorded. Both are honoured, and
+  /// [onHostKeyVerifyTyped] wins when both are given.
+  /// 这里不传密钥*类型*（"ssh-ed25519"、"ssh-rsa" 等）；需要记录类型时请用
+  /// [onHostKeyVerifyTyped]。两者都会生效，同时提供时以 [onHostKeyVerifyTyped]
+  /// 为准。
   final Future<bool> Function(String fingerprint)? onHostKeyVerify;
+
+  /// Host key verification callback that also receives the key type.
+  /// 同时接收密钥类型的主机密钥验证回调。
+  ///
+  /// [type] is the algorithm the server presented (e.g. `ssh-ed25519`,
+  /// `ssh-rsa`), as dartssh2 reports it; [fingerprint] is formatted exactly as
+  /// [onHostKeyVerify] would receive it, so both callbacks can share one trust
+  /// store. [onHostKeyVerify] is implemented on top of this shape, which is why
+  /// the two can never disagree about a fingerprint.
+  /// [type] 是服务端出示的算法（如 `ssh-ed25519`、`ssh-rsa`），由 dartssh2 上报；
+  /// [fingerprint] 的格式与 [onHostKeyVerify] 收到的完全一致，因此两个回调可以
+  /// 共用同一个信任存储。[onHostKeyVerify] 就建立在这一形态之上，所以两者对指纹
+  /// 的判断不可能出现分歧。
+  final Future<bool> Function(String type, String fingerprint)?
+  onHostKeyVerifyTyped;
 
   final Duration connectTimeout;
 
@@ -127,8 +199,30 @@ class SshConnection {
     required this.host,
     required this.credential,
     this.onHostKeyVerify,
+    this.onHostKeyVerifyTyped,
     this.connectTimeout = const Duration(seconds: 10),
   });
+
+  /// The verification callback to hand to dartssh2, derived from whichever of
+  /// the two public callbacks was supplied, or `null` when neither was.
+  /// 实际交给 dartssh2 的验证回调：由两个公开回调中提供的那个派生而来，
+  /// 两者都没有时为 `null`。
+  ///
+  /// [onHostKeyVerifyTyped] is preferred, and the fingerprint-only
+  /// [onHostKeyVerify] is adapted to the same `(type, fingerprint)` shape —
+  /// one code path, so a call site can migrate to the typed callback (to record
+  /// the key type) without its verification behaviour changing at all.
+  /// 优先使用 [onHostKeyVerifyTyped]；只有指纹的 [onHostKeyVerify] 会被适配成
+  /// 同样的 `(type, fingerprint)` 形态——只有一条代码路径，因此调用点迁移到带类型
+  /// 的回调（以便记录密钥类型）时，其验证行为不会有任何改变。
+  Future<bool> Function(String type, String fingerprint)?
+  get _hostKeyVerifier {
+    final typed = onHostKeyVerifyTyped;
+    if (typed != null) return typed;
+    final legacy = onHostKeyVerify;
+    if (legacy == null) return null;
+    return (type, fingerprint) => legacy(fingerprint);
+  }
 
   /// Updates and broadcasts the connection state.
   /// 更新并广播连接状态。
@@ -229,6 +323,11 @@ class SshConnection {
         return;
       }
 
+      // Resolved once per attempt, so the callback used for a given connection
+      // cannot be swapped halfway through the handshake.
+      // 每次尝试只解析一次，握手中途不可能被换成另一个回调。
+      final hostKeyVerifier = _hostKeyVerifier;
+
       final client = SSHClient(
         socket,
         username: credential.username,
@@ -240,14 +339,17 @@ class SshConnection {
             : null,
 
         /// Pass through host key verification if a callback is provided.
-        /// Formats the raw MD5 fingerprint into a readable string like "MD5:ab:cd:...".
-        /// 如果提供了主机密钥验证回调，则透传。将原始 MD5 指纹格式化为类似 "MD5:ab:cd:..." 的可读字符串。
-        onVerifyHostKey: onHostKeyVerify != null
-            ? (type, rawFingerprint) async {
-                final fingerprint = HostKeyVerifier.formatMd5(rawFingerprint);
-                return onHostKeyVerify!(fingerprint);
-              }
-            : null,
+        /// Formats the raw MD5 fingerprint into a readable string like
+        /// "MD5:ab:cd:...", and hands the key type through to the callback
+        /// unchanged instead of dropping it.
+        /// 如果提供了主机密钥验证回调，则透传。将原始 MD5 指纹格式化为类似
+        /// "MD5:ab:cd:..." 的可读字符串，并把密钥类型原样交给回调而不是丢弃。
+        onVerifyHostKey: hostKeyVerifier == null
+            ? null
+            : (type, rawFingerprint) async => hostKeyVerifier(
+                  type,
+                  HostKeyVerifier.formatMd5(rawFingerprint),
+                ),
       );
 
       // Publish the client before awaiting so that disconnect()/dispose() can
