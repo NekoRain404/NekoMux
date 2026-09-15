@@ -3461,5 +3461,70 @@ class AppStrings {
       'ru': 'Сохранено. Оставьте пустым, чтобы не менять',
       'es': 'Guardado. Déjelo vacío para conservarlo',
     },
+
+    /// A host that previously presented one key now presents a different one.
+    /// This is the only available signal of an interception attempt, so the
+    /// wording has to read as a warning rather than as a routine confirmation.
+    /// 此前提供过某个密钥的主机，这次提供了另一个密钥。
+    /// 这是唯一可用的被劫持信号，因此措辞必须是警告，而不是普通的确认。
+    'host_key_changed_title': {
+      'zh': '主机密钥已改变',
+      'en': 'Host key has changed',
+      'ja': 'ホスト鍵が変更されました',
+      'ko': '호스트 키가 변경되었습니다',
+      'fr': 'La clé de l’hôte a changé',
+      'de': 'Hostschlüssel hat sich geändert',
+      'ru': 'Ключ хоста изменился',
+      'es': 'La clave del host ha cambiado',
+    },
+    'host_key_changed_body': {
+      'zh':
+          '这台服务器以前使用的是另一个密钥。这可能意味着服务器被重装过，'
+          '也可能意味着有人在窃听这次连接。请先通过其它渠道核对下面的指纹，'
+          '确认无误后再继续。',
+      'en':
+          'This server previously presented a different key. That can mean the '
+          'server was reinstalled — or that someone is intercepting this '
+          'connection. Verify the fingerprint below through another channel '
+          'before continuing.',
+      'ja':
+          'このサーバーは以前とは別の鍵を提示しています。サーバーが再インストールされた'
+          '可能性もありますが、接続が傍受されている可能性もあります。'
+          '続行する前に、下のフィンガープリントを別の経路で確認してください。',
+      'ko':
+          '이 서버는 이전과 다른 키를 제시했습니다. 서버가 재설치되었을 수도 있지만 '
+          '누군가 이 연결을 가로채고 있을 수도 있습니다. 계속하기 전에 아래 '
+          '지문을 다른 경로로 확인하십시오.',
+      'fr':
+          'Ce serveur présentait auparavant une clé différente. Cela peut '
+          'signifier que le serveur a été réinstallé — ou que quelqu’un '
+          'intercepte cette connexion. Vérifiez l’empreinte ci-dessous par un '
+          'autre canal avant de continuer.',
+      'de':
+          'Dieser Server hat zuvor einen anderen Schlüssel verwendet. Das kann '
+          'bedeuten, dass er neu installiert wurde — oder dass jemand diese '
+          'Verbindung abhört. Prüfen Sie den Fingerabdruck unten über einen '
+          'anderen Kanal, bevor Sie fortfahren.',
+      'ru':
+          'Ранее этот сервер предъявлял другой ключ. Это может означать, что '
+          'сервер переустановили, — или что кто-то перехватывает это '
+          'соединение. Прежде чем продолжить, проверьте отпечаток ниже по '
+          'другому каналу.',
+      'es':
+          'Este servidor presentaba antes una clave distinta. Puede significar '
+          'que el servidor se reinstaló, o que alguien está interceptando esta '
+          'conexión. Verifique la huella de abajo por otro canal antes de '
+          'continuar.',
+    },
+    'host_key_trust_anyway': {
+      'zh': '我已核对，仍然连接',
+      'en': 'I verified it, connect anyway',
+      'ja': '確認しました。それでも接続する',
+      'ko': '확인했습니다. 그래도 연결',
+      'fr': 'J’ai vérifié, se connecter quand même',
+      'de': 'Geprüft, trotzdem verbinden',
+      'ru': 'Я проверил, всё равно подключиться',
+      'es': 'Lo he verificado, conectar igualmente',
+    },
   };
 }
