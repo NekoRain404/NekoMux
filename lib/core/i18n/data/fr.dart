@@ -400,4 +400,16 @@ const Map<String, String> frStrings = <String, String>{
   'theme_mono': 'Monochrome',
   'credential_used_by_hosts':
       '{0} hôtes utilisent cet identifiant et ne pourront plus se connecter',
+  'transfer_title': 'Transferts',
+  'transfer_status_queued': 'En attente',
+  'transfer_status_running': 'Transfert en cours',
+  'transfer_status_done': 'Terminé',
+  'transfer_status_failed': 'Échec',
+  'transfer_status_cancelled': 'Annulé',
+  'transfer_direction_upload': 'Envoi',
+  'transfer_direction_download': 'Téléchargement',
+  'transfer_retry': 'Réessayer',
+  'transfer_clear_finished': 'Effacer les terminés',
+  'transfer_unknown_size': 'Taille inconnue',
+  'transfer_error_local_io': 'Erreur de fichier local',
 };

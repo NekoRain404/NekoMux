@@ -396,4 +396,16 @@ const Map<String, String> ruStrings = <String, String>{
   'theme_mono': 'Монохром',
   'credential_used_by_hosts':
       'Этот учётные данные используют {0} хостов — после удаления они не смогут подключиться',
+  'transfer_title': 'Передачи',
+  'transfer_status_queued': 'В очереди',
+  'transfer_status_running': 'Передача',
+  'transfer_status_done': 'Завершено',
+  'transfer_status_failed': 'Ошибка',
+  'transfer_status_cancelled': 'Отменено',
+  'transfer_direction_upload': 'Загрузка на сервер',
+  'transfer_direction_download': 'Скачивание',
+  'transfer_retry': 'Повторить',
+  'transfer_clear_finished': 'Очистить завершённые',
+  'transfer_unknown_size': 'Размер неизвестен',
+  'transfer_error_local_io': 'Ошибка локального файла',
 };

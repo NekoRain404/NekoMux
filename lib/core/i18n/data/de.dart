@@ -398,4 +398,16 @@ const Map<String, String> deStrings = <String, String>{
   'theme_mono': 'Monochrom',
   'credential_used_by_hosts':
       '{0} Hosts verwenden diese Zugangsdaten und können danach keine Verbindung mehr herstellen',
+  'transfer_title': 'Übertragungen',
+  'transfer_status_queued': 'In Warteschlange',
+  'transfer_status_running': 'Wird übertragen',
+  'transfer_status_done': 'Abgeschlossen',
+  'transfer_status_failed': 'Fehlgeschlagen',
+  'transfer_status_cancelled': 'Abgebrochen',
+  'transfer_direction_upload': 'Hochladen',
+  'transfer_direction_download': 'Herunterladen',
+  'transfer_retry': 'Wiederholen',
+  'transfer_clear_finished': 'Beendete entfernen',
+  'transfer_unknown_size': 'Größe unbekannt',
+  'transfer_error_local_io': 'Fehler bei lokaler Datei',
 };

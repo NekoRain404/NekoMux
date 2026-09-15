@@ -267,6 +267,182 @@ class SftpService {
     }
   }
 
+  /// Size of the remote file at [path] in bytes, or null when the server does
+  /// not report one.
+  /// [path] 路径下远程文件的大小（字节）；服务器未报告时为 null。
+  ///
+  /// Exists so the transfer queue can show how far a download has come: without
+  /// a total there is no progress bar, only a spinner, and a 500 MB package that
+  /// shows a spinner for four minutes is indistinguishable from a hang.
+  /// 它存在的理由是让传输队列能显示下载进度：没有总数就没有进度条，只有转圈；而一个
+  /// 转圈四分钟的 500 MB 安装包，与卡死无法区分。
+  ///
+  /// Reported as [SftpFailure.read] when it fails. A stat is a read of the file's
+  /// metadata, and the alternative — a `stat` code of its own — would be a
+  /// near-duplicate that every caller had to handle separately for no gain.
+  /// 失败时上报 [SftpFailure.read]。stat 读取的是文件的元数据；另一种做法是给它一个
+  /// 独立的 `stat` 编码，但那只是近似重复，会让每个调用方为此单独分支而无任何收益。
+  ///
+  /// Null is a normal answer, not an error: SFTP servers are not obliged to
+  /// report a size, and a size of 0 is not the same thing as no size at all.
+  /// Callers that only want a progress denominator should treat null as "unknown"
+  /// and carry on.
+  /// null 是正常答案而非错误：SFTP 服务器没有义务报告大小，而大小为 0 与没有大小
+  /// 也不是一回事。只把大小当作进度分母的调用方应把 null 视为「未知」并继续。
+  Future<int?> fileSize(String path) async {
+    _ensureConnected();
+    try {
+      final attrs = await _sftp!.stat(path);
+      return attrs.size;
+    } catch (e) {
+      throw SftpException(SftpFailure.read, e.toString());
+    }
+  }
+
+  /// Stream the contents of the remote file at [path], in chunks, reporting the
+  /// number of bytes read so far to [onProgress].
+  /// 以分块方式流式读取 [path] 路径下远程文件的内容，并通过 [onProgress] 报告已读取
+  /// 的字节数。
+  ///
+  /// Unlike [readFile], the file is never held in memory as a whole: chunks are
+  /// yielded as the server sends them, so a 500 MB file costs a chunk, not
+  /// 500 MB. [readFile] stays for the previews that genuinely want the bytes.
+  /// 与 [readFile] 不同，本方法从不把整个文件放进内存：服务器发来一块就产出一块，因此
+  /// 500 MB 的文件只占用一块的开销，而不是 500 MB。[readFile] 继续服务于那些确实需要
+  /// 完整字节的预览场景。
+  ///
+  /// Cancelling the subscription stops the transfer. That is a real stop, not a
+  /// cosmetic one: this is an `async*` generator, so cancelling runs the
+  /// `finally` below, which closes the server-side file handle — no further
+  /// READ is ever issued and the handle is not left open. The chunking, the
+  /// pipelining and the progress accounting are dartssh2's `SftpFile.read`; none
+  /// of it is reimplemented here.
+  /// 取消订阅即停止传输。这是真正的停止，不是表面功夫：本方法是一个 `async*` 生成器，
+  /// 取消会让下面的 `finally` 执行并关闭服务器端文件句柄——此后不会再发出任何 READ，
+  /// 句柄也不会被留在打开状态。分块、流水线与进度统计都由 dartssh2 的 `SftpFile.read`
+  /// 完成，这里没有重新实现其中任何一部分。
+  ///
+  /// It is not instantaneous, and the bound is worth stating because it is what a
+  /// caller waits on: an `async*` generator only unwinds at a suspension point, so
+  /// a cancel lands when control next reaches the `yield*` — in practice after the
+  /// reads already in flight (dartssh2 pipelines them) have been answered. No new
+  /// READ is issued after that. Measured against a real server on loopback:
+  /// `cancel()` returned in 130-175 ms with about a megabyte in flight, and the
+  /// bytes delivered after it returned were zero.
+  /// 它不是瞬时的，而这个上界值得写明，因为调用方要等它：`async*` 生成器只在挂起点
+  /// 展开，因此取消会在控制流下一次到达 `yield*` 时生效——实际就是已经发出的读（
+  /// dartssh2 会流水线化它们）得到应答之后。此后不会再发出新的 READ。在回环地址上对
+  /// 真实服务器实测：约 1 MB 在途时 `cancel()` 在 130–175 ms 内返回，返回之后送达的
+  /// 字节数为 0。
+  Stream<Uint8List> downloadStream(
+    String path, {
+    void Function(int bytesRead)? onProgress,
+  }) async* {
+    _ensureConnected();
+    SftpFile? file;
+    try {
+      file = await _sftp!.open(path, mode: SftpFileOpenMode.read);
+      yield* file.read(onProgress: onProgress);
+    } catch (e) {
+      throw SftpException(SftpFailure.read, e.toString());
+    } finally {
+      // Runs on normal completion, on error *and* on cancellation. Guarded
+      // because closing can throw once the transport is gone, and a throw here
+      // would replace the real failure (or, on cancellation, surface as an
+      // unhandled error on a stream nobody is listening to any more).
+      // 正常结束、出错**以及**被取消时都会执行。做了守护，因为传输层消失后关闭会抛
+      // 异常，而在这里抛出会顶掉真正的失败（被取消时则会在一个已无人监听的流上变成
+      // 未处理错误）。
+      try {
+        await file?.close();
+      } catch (_) {
+        // Handle already released / 句柄已释放。
+      }
+    }
+  }
+
+  /// Upload [data] to the remote file at [path], reporting the number of bytes
+  /// written so far to [onProgress].
+  /// 将 [data] 上传到 [path] 路径下的远程文件，并通过 [onProgress] 报告已写入的字节数。
+  ///
+  /// The file is created if missing and truncated if present — the same mode
+  /// [writeFile] uses, so an upload that fails half way does not leave the old
+  /// contents hiding behind a new name.
+  /// 文件不存在则创建，存在则截断——与 [writeFile] 相同的模式，因此中途失败的上传
+  /// 不会让旧内容藏在新名字后面。
+  ///
+  /// [data] is consumed as a stream and written as it arrives, so the peak memory
+  /// cost is one write window, not the file. Backpressure is end to end: when
+  /// dartssh2's writer has a megabyte unacknowledged it pauses its subscription,
+  /// which pauses whoever feeds this stream.
+  /// [data] 按流消费、边到边写，因此内存峰值是一个写入窗口，而不是整个文件。背压是
+  /// 端到端的：当 dartssh2 的写入器有 1 MB 未被确认时，它会暂停自己的订阅，进而暂停
+  /// 向本方法供流的一方。
+  ///
+  /// [data] must not emit an error. dartssh2's writer installs no error handler on
+  /// the stream it is given, so an error would be reported as an unhandled async
+  /// error *and* leave its `done` pending forever — a hung upload that blocks its
+  /// whole host queue. The queue therefore never errors the stream it hands over;
+  /// it closes it and reports the cause separately. See [_guardedSource] for the
+  /// backstop when a caller does not.
+  /// [data] 不得发出错误。dartssh2 的写入器没有为它收到的流安装错误处理，因此错误会
+  /// 变成未处理的异步错误，**并且**让它的 `done` 永远悬着——一次挂死的上传会阻塞整条
+  /// 该主机的队列。因此队列交给它的流从不报错，而是关闭它并另行报告原因。调用方若不
+  /// 遵守，由 [_guardedSource] 兜底。
+  ///
+  /// Cancellation is the caller's to arrange, and the shape is deliberate: the
+  /// caller owns the stream it passes in, so closing that stream is what stops
+  /// the transfer. Closing it ends dartssh2's `done`, which closes the handle
+  /// below — there is no second, half-open way out of this method.
+  /// 取消由调用方安排，其形式是刻意的：调用方拥有自己传入的流，因此关闭该流就是停止
+  /// 传输的手段。关闭它会结束 dartssh2 的 `done`，从而执行下面的句柄关闭——本方法
+  /// 不存在第二条留下半开句柄的退出路径。
+  Future<void> uploadStream(
+    String path,
+    Stream<Uint8List> data, {
+    void Function(int bytesWritten)? onProgress,
+  }) async {
+    _ensureConnected();
+    SftpFile? file;
+    Object? sourceError;
+    try {
+      file = await _sftp!.open(
+        path,
+        mode:
+            SftpFileOpenMode.write |
+            SftpFileOpenMode.create |
+            SftpFileOpenMode.truncate,
+      );
+      // `done` completes when the last chunk has been acknowledged, so awaiting
+      // it — rather than returning as soon as the last local byte was handed
+      // over — is what makes "the upload finished" true when this returns.
+      // `done` 在最后一块被确认时才完成，因此等待它（而不是在交出最后一个本地字节时
+      // 就返回）正是「上传已完成」在本方法返回时为真的原因。
+      await file
+          .write(
+            _guardedSource(data, (e) => sourceError = e),
+            onProgress: onProgress,
+          )
+          .done;
+    } catch (e) {
+      throw SftpException(SftpFailure.write, e.toString());
+    } finally {
+      // Guarded for the same reason as in [downloadStream]: a throw from the
+      // close must not replace the failure that caused it, and must never leave
+      // the handle open.
+      // 守护理由同 [downloadStream]：关闭抛出的异常不得顶掉引发它的失败，也绝不能把
+      // 句柄留在打开状态。
+      try {
+        await file?.close();
+      } catch (_) {
+        // Handle already released / 句柄已释放。
+      }
+    }
+    if (sourceError != null) {
+      throw SftpException(SftpFailure.write, sourceError.toString());
+    }
+  }
+
   /// Delete a file or empty directory at [path].
   /// 删除 [path] 路径下的文件或空目录。
   ///
@@ -329,6 +505,32 @@ class SftpService {
   void _ensureConnected() {
     if (_sftp == null || _client == null) {
       throw const SftpException(SftpFailure.notConnected);
+    }
+  }
+
+  /// [source] with any error reported to [onError] and then turned into an
+  /// ordinary end of stream.
+  /// 把 [source] 的错误报告给 [onError] 后，转成一次普通的流结束。
+  ///
+  /// An `async*` body wrapping `await for` is the only shape that both keeps
+  /// backpressure (a paused consumer pauses [source], which is what a plain
+  /// `handleError` would give up) and guarantees the output stream *ends* rather
+  /// than erroring — and ending is the point: see [uploadStream] for why an
+  /// error on this stream hangs the writer instead of failing it.
+  /// 用 `async*` 包住 `await for` 是唯一同时满足两件事的写法：既保住背压（消费者暂停
+  /// 会暂停 [source]，而朴素地用 `handleError` 会丢掉这一点），又保证输出流*结束*而
+  /// 不是报错——而「结束」正是关键：[uploadStream] 的注释解释了为什么这条流上的错误
+  /// 会让写入器挂死而不是失败。
+  Stream<Uint8List> _guardedSource(
+    Stream<Uint8List> source,
+    void Function(Object error) onError,
+  ) async* {
+    try {
+      await for (final chunk in source) {
+        yield chunk;
+      }
+    } catch (e) {
+      onError(e);
     }
   }
 

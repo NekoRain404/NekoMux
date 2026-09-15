@@ -396,4 +396,16 @@ const Map<String, String> esStrings = <String, String>{
   'theme_mono': 'Monocromo',
   'credential_used_by_hosts':
       '{0} hosts usan estas credenciales y dejarán de poder conectarse',
+  'transfer_title': 'Transferencias',
+  'transfer_status_queued': 'En cola',
+  'transfer_status_running': 'Transfiriendo',
+  'transfer_status_done': 'Completado',
+  'transfer_status_failed': 'Error',
+  'transfer_status_cancelled': 'Cancelado',
+  'transfer_direction_upload': 'Subir',
+  'transfer_direction_download': 'Descargar',
+  'transfer_retry': 'Reintentar',
+  'transfer_clear_finished': 'Borrar los terminados',
+  'transfer_unknown_size': 'Tamaño desconocido',
+  'transfer_error_local_io': 'Error de archivo local',
 };

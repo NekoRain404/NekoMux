@@ -394,4 +394,16 @@ const Map<String, String> enStrings = <String, String>{
   'theme_mono': 'Monochrome',
   'credential_used_by_hosts':
       '{0} hosts use this credential and will stop being able to connect',
+  'transfer_title': 'Transfers',
+  'transfer_status_queued': 'Queued',
+  'transfer_status_running': 'Transferring',
+  'transfer_status_done': 'Completed',
+  'transfer_status_failed': 'Failed',
+  'transfer_status_cancelled': 'Cancelled',
+  'transfer_direction_upload': 'Upload',
+  'transfer_direction_download': 'Download',
+  'transfer_retry': 'Retry',
+  'transfer_clear_finished': 'Clear finished',
+  'transfer_unknown_size': 'Unknown size',
+  'transfer_error_local_io': 'Local file error',
 };
