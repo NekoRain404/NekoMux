@@ -361,4 +361,12 @@ const Map<String, String> enStrings = <String, String>{
       'connection. Verify the fingerprint below through another channel '
       'before continuing.',
   'host_key_trust_anyway': 'I verified it, connect anyway',
+  'host_status_unverified': 'Unverified',
+  'host_status_unverified_hint':
+      'This host\'s key has not been confirmed. Connect once to verify it.',
+  'export_include_secrets': 'Include passwords and private keys',
+  'export_secrets_warning':
+      'The export will contain usable credentials. Do not paste it into a chat, a note, or anywhere that syncs.',
+  'export_secrets_omitted':
+      'The backup holds no credentials; you will need to re-enter them after restoring',
 };

@@ -349,4 +349,10 @@ const Map<String, String> jaStrings = <String, String>{
       '可能性もありますが、接続が傍受されている可能性もあります。'
       '続行する前に、下のフィンガープリントを別の経路で確認してください。',
   'host_key_trust_anyway': '確認しました。それでも接続する',
+  'host_status_unverified': '未確認',
+  'host_status_unverified_hint': 'このホストの鍵はまだ確認されていません。一度接続すると確認できます。',
+  'export_include_secrets': 'パスワードと秘密鍵をバックアップに含める',
+  'export_secrets_warning':
+      'エクスポートには有効な認証情報が含まれます。チャットやメモ、同期される場所に貼り付けないでください。',
+  'export_secrets_omitted': 'バックアップに認証情報は含まれていません。復元後に再入力が必要です。',
 };

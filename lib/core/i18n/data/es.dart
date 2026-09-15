@@ -362,4 +362,12 @@ const Map<String, String> esStrings = <String, String>{
       'conexión. Verifique la huella de abajo por otro canal antes de '
       'continuar.',
   'host_key_trust_anyway': 'Lo he verificado, conectar igualmente',
+  'host_status_unverified': 'Sin verificar',
+  'host_status_unverified_hint':
+      'La clave de este host aún no se ha confirmado. Conéctese una vez para verificarla.',
+  'export_include_secrets': 'Incluir contraseñas y claves privadas',
+  'export_secrets_warning':
+      'La exportación contendrá credenciales utilizables. No la pegue en un chat, una nota ni en ningún lugar que se sincronice.',
+  'export_secrets_omitted':
+      'La copia no contiene credenciales; tendrá que volver a introducirlas tras restaurarla.',
 };

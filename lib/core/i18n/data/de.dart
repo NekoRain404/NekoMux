@@ -365,4 +365,12 @@ const Map<String, String> deStrings = <String, String>{
       'Verbindung abhört. Prüfen Sie den Fingerabdruck unten über einen '
       'anderen Kanal, bevor Sie fortfahren.',
   'host_key_trust_anyway': 'Geprüft, trotzdem verbinden',
+  'host_status_unverified': 'Unbestätigt',
+  'host_status_unverified_hint':
+      'Der Schlüssel dieses Hosts wurde noch nicht bestätigt. Stellen Sie einmal eine Verbindung her.',
+  'export_include_secrets': 'Passwörter und private Schlüssel einbeziehen',
+  'export_secrets_warning':
+      'Der Export enthält gültige Zugangsdaten. Fügen Sie ihn nicht in einen Chat, eine Notiz oder einen synchronisierten Ort ein.',
+  'export_secrets_omitted':
+      'Die Sicherung enthält keine Zugangsdaten; nach dem Wiederherstellen müssen Sie sie erneut eingeben.',
 };

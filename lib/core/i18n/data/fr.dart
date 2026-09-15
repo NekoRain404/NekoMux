@@ -366,4 +366,12 @@ const Map<String, String> frStrings = <String, String>{
       'intercepte cette connexion. Vérifiez l’empreinte ci-dessous par un '
       'autre canal avant de continuer.',
   'host_key_trust_anyway': 'J’ai vérifié, se connecter quand même',
+  'host_status_unverified': 'Non vérifié',
+  'host_status_unverified_hint':
+      'La clé de cet hôte n\'a pas encore été confirmée. Connectez-vous une fois pour la vérifier.',
+  'export_include_secrets': 'Inclure les mots de passe et les clés privées',
+  'export_secrets_warning':
+      'L\'export contiendra des identifiants utilisables. Ne le collez pas dans un chat, une note ou tout emplacement synchronisé.',
+  'export_secrets_omitted':
+      'La sauvegarde ne contient aucun identifiant ; vous devrez les ressaisir après restauration.',
 };

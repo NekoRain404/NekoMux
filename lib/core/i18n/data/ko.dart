@@ -349,4 +349,10 @@ const Map<String, String> koStrings = <String, String>{
       '누군가 이 연결을 가로채고 있을 수도 있습니다. 계속하기 전에 아래 '
       '지문을 다른 경로로 확인하십시오.',
   'host_key_trust_anyway': '확인했습니다. 그래도 연결',
+  'host_status_unverified': '미확인',
+  'host_status_unverified_hint': '이 호스트의 키가 아직 확인되지 않았습니다. 한 번 연결하면 확인됩니다.',
+  'export_include_secrets': '비밀번호와 개인 키를 백업에 포함',
+  'export_secrets_warning':
+      '내보내기에는 실제 사용 가능한 자격 증명이 포함됩니다. 채팅, 메모 또는 동기화되는 곳에 붙여넣지 마십시오.',
+  'export_secrets_omitted': '백업에 자격 증명이 포함되지 않았습니다. 복원 후 다시 입력해야 합니다.',
 };

@@ -346,4 +346,9 @@ const Map<String, String> zhStrings = <String, String>{
       '也可能意味着有人在窃听这次连接。请先通过其它渠道核对下面的指纹，'
       '确认无误后再继续。',
   'host_key_trust_anyway': '我已核对，仍然连接',
+  'host_status_unverified': '待验证',
+  'host_status_unverified_hint': '尚未确认此主机的密钥，连接一次即可完成验证',
+  'export_include_secrets': '在备份中包含密码与私钥',
+  'export_secrets_warning': '导出内容会包含可用的登录凭据。请勿粘贴到聊天、备忘录或任何会被同步的地方。',
+  'export_secrets_omitted': '备份未包含凭据，恢复到新设备后需要重新输入',
 };
