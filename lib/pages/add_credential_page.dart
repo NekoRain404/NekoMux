@@ -25,7 +25,28 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
   String? _keyValidationError;
   bool _isHandlingBack = false;
 
+  /// Whether the user has typed secret material of their own.
+  /// 用户是否已自行输入密钥内容（密码或私钥）。
+  bool _hasUserSecret = false;
+
+  /// Whether the auth method was switched on this page. A secret stored for
+  /// the previous method must never be reused afterwards.
+  /// 本页是否切换过认证方式；切换后不得复用此前存储的密钥。
+  bool _authTypeSwitched = false;
+
   bool get _isEditing => widget.existingCredential != null;
+
+  /// Whether saving may reuse the secret already in secure storage: only while
+  /// editing, only when the user typed nothing, and only when the auth method
+  /// still matches the one the stored secret belongs to.
+  /// 保存时是否可以沿用安全存储中已有的密钥：
+  /// 仅在编辑模式、用户未输入内容、且认证方式未切换时为 true。
+  bool get _keepStoredSecret =>
+      _isEditing &&
+      !_hasUserSecret &&
+      !_authTypeSwitched &&
+      widget.existingCredential!.secretData.isNotEmpty;
+
   bool get _hasChanges {
     final c = widget.existingCredential;
     if (c == null) {
@@ -35,7 +56,8 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
           _authType != 0;
     }
     final secretChanged =
-        _secretController.text != '••••••••' &&
+        !_keepStoredSecret &&
+        _secretController.text.isNotEmpty &&
         _secretController.text != c.secretData;
     return _nameController.text.trim() != c.name ||
         _usernameController.text.trim() != c.username ||
@@ -49,9 +71,11 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
     final c = widget.existingCredential;
     _nameController = TextEditingController(text: c?.name ?? '');
     _usernameController = TextEditingController(text: c?.username ?? '');
-    _secretController = TextEditingController(
-      text: _isEditing ? '••••••••' : '',
-    );
+    // The field always starts empty: the stored secret is never written into
+    // it, so typed input can never be appended to a placeholder value.
+    // 输入框始终以空内容开始：已存储的密钥绝不写入输入框，
+    // 因此用户输入永远不会拼接在占位内容之后。
+    _secretController = TextEditingController();
     _authType = c?.authType ?? 0;
   }
 
@@ -101,10 +125,12 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
 
   String? _validateKey(String? value) {
     if (_authType != 1) return null;
+    // Keeping the stored key unchanged is a state decision, never a text match.
+    // 沿用已存储的私钥是状态判断，绝不依赖文本比对。
+    if (_keepStoredSecret) return null;
     if (value == null || value.trim().isEmpty) {
       return t('must_enter_key_content');
     }
-    if (value == '••••••••') return null;
     final trimmed = value.trim();
     final validStart = [
       '-----BEGIN RSA PRIVATE KEY-----',
@@ -122,12 +148,30 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
     return null;
   }
 
+  /// Switches the auth method and invalidates whatever the secret field holds.
+  /// Material of one kind must never be carried over to the other kind.
+  /// 切换认证方式，并作废输入框中的内容：
+  /// 一种认证方式的密钥材料绝不能顺延到另一种认证方式。
+  void _selectAuthType(int type) {
+    if (_authType == type) return;
+    setState(() {
+      _authType = type;
+      _keyValidationError = null;
+      _authTypeSwitched = true;
+      _hasUserSecret = false;
+      _secretController.clear();
+    });
+  }
+
   void _save() {
     HapticFeedback.lightImpact();
     if (!_formKey.currentState!.validate()) return;
     final cs = Theme.of(context).colorScheme;
 
-    final secretData = _secretController.text == '••••••••' && _isEditing
+    // Reuse the stored secret only when no new material was typed and the auth
+    // method still matches what the stored secret was created for.
+    // 仅在用户未输入新内容、且认证方式与已存储密钥相符时才沿用旧密钥。
+    final secretData = _keepStoredSecret
         ? widget.existingCredential!.secretData
         : _secretController.text;
 
@@ -260,10 +304,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                       label: t('password_auth'),
                       selected: _authType == 0,
                       color: cs.secondary,
-                      onTap: () => setState(() {
-                        _authType = 0;
-                        _keyValidationError = null;
-                      }),
+                      onTap: () => _selectAuthType(0),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -273,10 +314,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                       label: t('key_auth'),
                       selected: _authType == 1,
                       color: cs.primary,
-                      onTap: () => setState(() {
-                        _authType = 1;
-                        _keyValidationError = null;
-                      }),
+                      onTap: () => _selectAuthType(1),
                     ),
                   ),
                 ],
@@ -297,17 +335,26 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
               const SizedBox(height: 16),
               if (_authType == 0)
                 TextFormField(
+                  // Distinct keys rebuild the field when the auth method is
+                  // switched, so no stale validation state survives the swap.
+                  // 使用不同的 Key，切换认证方式时重建输入框，不残留旧的校验状态。
+                  key: const ValueKey('credential_password_field'),
                   controller: _secretController,
                   style: TextStyle(color: cs.onSurface),
                   obscureText: true,
                   textInputAction: TextInputAction.done,
                   decoration: _inputDecoration(
                     t('password'),
-                    hint: t('password_hint'),
+                    hint: _keepStoredSecret
+                        ? t('secret_kept_hint')
+                        : t('password_hint'),
                   ),
+                  onChanged: (v) =>
+                      setState(() => _hasUserSecret = v.isNotEmpty),
                   onFieldSubmitted: (_) => _save(),
                   validator: (v) {
-                    if (_isEditing && v == '••••••••') return null;
+                    if (_authType != 0) return null;
+                    if (_keepStoredSecret) return null;
                     return (v == null || v.isEmpty)
                         ? t('must_enter_password')
                         : null;
@@ -315,6 +362,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                 )
               else ...[
                 TextFormField(
+                  key: const ValueKey('credential_private_key_field'),
                   controller: _secretController,
                   style: TextStyle(
                     color: cs.onSurface,
@@ -326,11 +374,16 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                   textInputAction: TextInputAction.newline,
                   decoration: _inputDecoration(
                     t('private_key'),
-                    hint: t('private_key_hint'),
+                    hint: _keepStoredSecret
+                        ? t('secret_kept_hint')
+                        : t('private_key_hint'),
                     error: _keyValidationError,
                   ),
                   onChanged: (v) {
-                    setState(() => _keyValidationError = _validateKey(v));
+                    setState(() {
+                      _hasUserSecret = v.isNotEmpty;
+                      _keyValidationError = _validateKey(v);
+                    });
                   },
                   validator: _validateKey,
                 ),
@@ -355,8 +408,8 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                     ),
                   ),
                 if (_keyValidationError == null &&
-                    _secretController.text.length > 5 &&
-                    _secretController.text != '••••••••')
+                    _hasUserSecret &&
+                    _secretController.text.length > 5)
                   Padding(
                     padding: const EdgeInsets.only(top: 6, left: 4),
                     child: Row(

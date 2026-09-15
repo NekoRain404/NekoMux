@@ -180,7 +180,6 @@ class AppStrings {
   static String get mustEnterName => get('must_enter_name');
   static String get mustEnterUsername => get('must_enter_username');
   static String get mustEnterPassword => get('must_enter_password');
-  static String get mustEnterKey => get('must_enter_key');
   static String get mustEnterAlias => get('must_enter_alias');
   static String get mustEnterIp => get('must_enter_ip');
   static String get mustEnterSnippetTitle => get('must_enter_snippet_title');
@@ -3421,6 +3420,46 @@ class AppStrings {
       'de': 'Leeres Verzeichnis',
       'ru': 'Пустая папка',
       'es': 'Directorio vacío',
+    },
+    'must_enter_name': {
+      'zh': '请输入凭据名称',
+      'en': 'Please enter a credential name',
+      'ja': '認証情報の名前を入力してください',
+      'ko': '자격 증명 이름을 입력하세요',
+      'fr': 'Veuillez entrer un nom d\'identifiant',
+      'de': 'Bitte geben Sie einen Namen für die Anmeldedaten ein',
+      'ru': 'Введите название учётных данных',
+      'es': 'Ingrese un nombre de credencial',
+    },
+    'must_enter_username': {
+      'zh': '请输入用户名',
+      'en': 'Please enter a username',
+      'ja': 'ユーザー名を入力してください',
+      'ko': '사용자 이름을 입력하세요',
+      'fr': 'Veuillez entrer un nom d\'utilisateur',
+      'de': 'Bitte geben Sie einen Benutzernamen ein',
+      'ru': 'Введите имя пользователя',
+      'es': 'Ingrese un nombre de usuario',
+    },
+    'must_enter_password': {
+      'zh': '请输入密码',
+      'en': 'Please enter a password',
+      'ja': 'パスワードを入力してください',
+      'ko': '비밀번호를 입력하세요',
+      'fr': 'Veuillez entrer un mot de passe',
+      'de': 'Bitte geben Sie ein Passwort ein',
+      'ru': 'Введите пароль',
+      'es': 'Ingrese una contraseña',
+    },
+    'secret_kept_hint': {
+      'zh': '已保存，留空保持不变',
+      'en': 'Saved. Leave empty to keep it',
+      'ja': '保存済み。空欄のままにすると変更されません',
+      'ko': '저장됨. 비워 두면 그대로 유지됩니다',
+      'fr': 'Enregistré. Laissez vide pour le conserver',
+      'de': 'Gespeichert. Leer lassen, um es beizubehalten',
+      'ru': 'Сохранено. Оставьте пустым, чтобы не менять',
+      'es': 'Guardado. Déjelo vacío para conservarlo',
     },
   };
 }

@@ -21,49 +21,8 @@ class MonitoringService {
   }
 
   // ===========================================================================
-  // top
+  // proc / free
   // ===========================================================================
-
-  /// Parse `top -b -n 1` output and return [cpuPercent, memPercent].
-  /// 解析 top 输出并返回 [CPU使用率%, 内存使用率%]。
-  ///
-  /// Sample input line (3rd non-empty line, e.g.):
-  ///   %Cpu(s): 12.3 us,  5.1 sy,  0.0 ni, 82.0 id,  0.1 wa, ...
-  ///   MiB Mem :  7821.2 total,  3456.7 free,  1890.1 used, ...
-  ///
-  /// CPU % = 100 – idle%.  MEM % = used / total × 100.
-  /// CPU% = 100 – idle值。 内存% = 已用 / 总量 × 100。
-  static List<double> parseTop(String output) {
-    double cpu = 0.0;
-    double mem = 0.0;
-    final lines = output.split('\n');
-
-    for (final line in lines) {
-      // Parse CPU line: "%Cpu(s):  ... id,"
-      // 解析 CPU 行："%Cpu(s):  ... id,"
-      if (line.startsWith('%Cpu')) {
-        final idMatch = RegExp(r'(\d+\.?\d*)\s*id').firstMatch(line);
-        if (idMatch != null) {
-          final idle = double.tryParse(idMatch.group(1)!) ?? 0;
-          cpu = (100.0 - idle).clamp(0.0, 100.0);
-        }
-      }
-
-      // Parse memory line: "MiB Mem :  total,  free,  used,  buff/cache"
-      // 解析内存行："MiB Mem :  total,  free,  used,  buff/cache"
-      if (line.contains('Mem') && line.contains('total')) {
-        final totalMatch = RegExp(r'(\d+\.?\d*)\s+total').firstMatch(line);
-        final usedMatch = RegExp(r'(\d+\.?\d*)\s+used').firstMatch(line);
-        if (totalMatch != null && usedMatch != null) {
-          final total = double.tryParse(totalMatch.group(1)!) ?? 1;
-          final used = double.tryParse(usedMatch.group(1)!) ?? 0;
-          mem = (used / total * 100.0).clamp(0.0, 100.0);
-        }
-      }
-    }
-
-    return [cpu, mem];
-  }
 
   static CpuTimes? parseProcStat(String output) {
     final line = output
@@ -108,26 +67,37 @@ class MonitoringService {
   /// Parse `free -m` output and return [totalMB, usedMB, freeMB].
   /// 解析 free 输出并返回 [总量MB, 已用MB, 空闲MB]。
   ///
-  /// Sample line (2nd row = Mem):
+  /// Sample rows:
   ///   Mem:      7821        1890        3456         ...
+  ///   内存：     7821        1890        3456         ...
+  ///
+  /// The row label is gettext-localized ("Mem:" in the C locale, "内存：" in
+  /// zh_CN, …), so the memory row is located structurally instead of by name:
+  /// it is the first row whose leading token is a non-numeric label followed by
+  /// three integers (total, used, free). The header row is skipped because its
+  /// trailing tokens are words, and the Swap row because it comes later.
+  /// 行标签会被 gettext 本地化（C 环境为 "Mem:"，zh_CN 为 "内存："），
+  /// 因此按结构而非名称定位内存行：首个 token 为非数字标签、其后三个 token
+  /// 均为整数。表头行因后续 token 不是数字而被跳过，Swap 行因位置靠后被跳过。
   static List<int> parseFree(String output) {
-    int total = 0, used = 0, free = 0;
-    final lines = output.split('\n');
+    for (final line in output.split('\n')) {
+      final parts = line.trim().split(RegExp(r'\s+'));
+      // Need a label plus at least total/used/free.
+      // 至少需要标签 + total/used/free 三个数字。
+      if (parts.length < 4) continue;
+      // A numeric first token cannot be a row label (e.g. wrap-around output).
+      // 首个 token 为数字时不是行标签。
+      if (int.tryParse(parts[0]) != null) continue;
 
-    for (final line in lines) {
-      if (line.startsWith('Mem:')) {
-        final parts = line.trim().split(RegExp(r'\s+'));
-        if (parts.length >= 4) {
-          // parts[0]="Mem:", parts[1]=total, parts[2]=used, parts[3]=free
-          total = int.tryParse(parts[1]) ?? 0;
-          used = int.tryParse(parts[2]) ?? 0;
-          free = int.tryParse(parts[3]) ?? 0;
-        }
-        break;
-      }
+      final total = int.tryParse(parts[1]);
+      final used = int.tryParse(parts[2]);
+      final free = int.tryParse(parts[3]);
+      if (total == null || used == null || free == null) continue;
+
+      return [total, used, free];
     }
 
-    return [total, used, free];
+    return [0, 0, 0];
   }
 
   // ===========================================================================
@@ -199,26 +169,47 @@ class MonitoringService {
     final results = <Map<String, dynamic>>[];
 
     for (final rawLine in lines) {
-      final line = rawLine.trim();
+      var line = rawLine.trim();
       if (line.isEmpty) continue;
-      // Skip lines starting with ● (bullet) or empty
-      // 跳过以 ● 开头的行或空行
-      if (line.startsWith('●') || line.startsWith('*')) continue;
+      // systemd marks failed / not-found units with a bullet in the first
+      // column, and --no-legend does not suppress it. That marker is not one of
+      // the columns, so strip it and parse the row like any other — dropping
+      // marked rows would hide exactly the units the user is looking for.
+      // The marker is U+25CF where the locale can render it, with an ASCII '*'
+      // fallback otherwise (e.g. LC_ALL=C).
+      // 失败/未找到的单元首列带项目符号，--no-legend 不会去掉它。该符号不属于
+      // 任何列，应剥离后照常解析；丢弃这些行会恰好隐藏用户最关心的单元。
+      // UTF-8 环境下为 U+25CF，否则回退为 ASCII '*'（如 LC_ALL=C）。
+      if (line.startsWith('●') || line.startsWith('*')) {
+        line = line.substring(1).trimLeft();
+        if (line.isEmpty) continue;
+      }
 
-      // Systemd output uses fixed-width columns. Split by 2+ spaces.
-      // systemd 输出使用定宽列，按 2+ 空格分割
-      final parts = line.split(RegExp(r'\s{2,}'));
+      // The columns are space-padded, but the padding is not uniform: systemd
+      // sizes each column to its widest value, so a 7-character SUB such as
+      // "running" is followed by a SINGLE space before the description, while
+      // "exited" is followed by two. Splitting on runs of 2+ spaces therefore
+      // folds SUB into DESCRIPTION for "running" — and a row whose LOAD/ACTIVE/
+      // SUB all overflow their padding ("not-found inactive dead") is merged
+      // into a single field. UNIT, LOAD, ACTIVE and SUB are always single
+      // whitespace-free tokens (unit names escape spaces as \x20), so tokenise
+      // the row instead: the first four tokens are the columns, everything
+      // after them is the description.
+      // 各列以空格填充，但填充宽度不一致：7 字符的 SUB（如 "running"）后只有
+      // 一个空格，而 "exited" 后有两个，因此按 2+ 空格切分会把 SUB 并入
+      // DESCRIPTION；当 LOAD/ACTIVE/SUB 均超出列宽时（"not-found inactive
+      // dead"）还会被并成一个字段。UNIT/LOAD/ACTIVE/SUB 都是不含空格的独立
+      // token，故改为按空白分词：前四个 token 为各列，其余为描述。
+      final parts = line.split(RegExp(r'\s+'));
       if (parts.length < 4) continue;
 
       try {
         results.add({
-          'unit': parts[0].trim(),
-          'load': parts[1].trim(),
-          'active': parts[2].trim(),
-          'sub': parts[3].trim(),
-          'description': parts.length > 4
-              ? parts.sublist(4).join(' ').trim()
-              : '',
+          'unit': parts[0],
+          'load': parts[1],
+          'active': parts[2],
+          'sub': parts[3],
+          'description': parts.length > 4 ? parts.sublist(4).join(' ') : '',
         });
       } catch (_) {
         // skip malformed lines / 跳过格式异常的行

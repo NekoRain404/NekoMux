@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NekoMux stores SSH passwords and private keys in flutter_secure_storage, which
+  wraps them with a key held in the Android Keystore. Keystore keys are bound to
+  the device and are never included in a backup, so any restore path that
+  resurrects the SQLite rows without their keys leaves every credential
+  undecryptable — reads then throw, and the host list fails to load.
+
+  Both extraction paths are therefore disabled:
+    - cloud-backup:    Google Drive auto-backup / reinstall on the same account
+    - device-transfer: Android 12+ device-to-device migration
+
+  android:allowBackup="false" in AndroidManifest.xml covers older API levels;
+  this file is the API 31+ equivalent and takes precedence there.
+  See docs/AUDIT-2026-09-15.html, finding sec-3.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

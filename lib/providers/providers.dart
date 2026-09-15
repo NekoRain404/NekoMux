@@ -172,14 +172,39 @@ class HostListNotifier extends AsyncNotifier<List<Host>> {
 
   /// Mark a host as online or offline, updating state without a DB round-trip.
   /// 将主机标记为在线或离线，直接更新状态而不访问数据库。
+  ///
+  /// The write is a no-op — no new list, no listener notification — when the
+  /// value already matches or the id is unknown. `AsyncValue` compares its
+  /// payload with `==`, and `List` compares by identity, so publishing a fresh
+  /// list for an unchanged status makes every listener rebuild; callers such as
+  /// the reachability probe call this repeatedly with the same result, which
+  /// used to keep the UI rebuilding forever.
+  /// 当取值已一致或 id 不存在时，本次写入为空操作：不新建列表，也不通知监听者。
+  /// `AsyncValue` 以 `==` 比较其内容，而 `List` 按同一性比较，因此为未变化的
+  /// 状态发布新列表会让所有监听者重建；可达性探测等调用方会反复写入相同结果，
+  /// 这曾导致界面无休止地重建。
   Future<void> setOnline(String id, bool online) async {
     final current = state.value;
     if (current == null) return;
-    final updated = current.map((h) {
-      if (h.id == id) h.isOnline = online;
-      return h;
-    }).toList();
-    state = AsyncData(updated);
+
+    // `Host.isOnline` is a mutable field, so read it before writing: only a
+    // genuine transition may notify.
+    // `Host.isOnline` 是可变字段，必须先读后写：只有真实的状态跃迁才通知。
+    bool known = false;
+    for (final host in current) {
+      if (host.id != id) continue;
+      known = true;
+      if (host.isOnline == online) return;
+      break;
+    }
+    if (!known) return;
+
+    for (final host in current) {
+      if (host.id == id) host.isOnline = online;
+    }
+    // A new list instance is what makes the real transition reach listeners.
+    // 新列表实例正是真实状态跃迁能送达监听者的原因。
+    state = AsyncData(List<Host>.of(current));
   }
 }
 

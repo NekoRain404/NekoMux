@@ -8,6 +8,7 @@ import '../core/theme/app_theme.dart';
 import '../providers/providers.dart';
 import '../providers/settings_provider.dart';
 import '../providers/theme_provider.dart';
+import '../services/backup_service.dart';
 import '../services/secure_storage.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
@@ -194,13 +195,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final hosts = await db.query('tb_hosts');
     final creds = await ref.read(credentialListProvider.future);
     final snippets = await db.query('tb_snippets');
-    final json = const JsonEncoder.withIndent('  ').convert({
-      'version': 1,
-      'exported_at': DateTime.now().toIso8601String(),
-      'hosts': hosts,
-      'credentials': creds.map((c) => c.toBackupMap()).toList(),
-      'snippets': snippets,
-    });
+    // Key names live in backup_service.dart so export and restore agree.
+    // 键名统一定义在 backup_service.dart，保证导出与恢复一致。
+    final json = const JsonEncoder.withIndent('  ').convert(
+      buildExportPayload(
+        hosts: hosts,
+        credentials: creds.map((c) => c.toBackupMap()).toList(),
+        snippets: snippets,
+      ),
+    );
     await Clipboard.setData(ClipboardData(text: json));
     if (mounted) {
       _showSnack(t('export_success'));
@@ -258,39 +261,62 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             onPressed: () async {
               Navigator.pop(ctx);
               try {
-                final json = jsonDecode(ctrl.text) as Map<String, dynamic>;
-                final db = await ref.read(databaseProvider.future);
-                final credentials = _readBackupRows(
-                  json,
-                  'credentials',
-                  'tb_credentials',
+                // Parse and validate every section BEFORE touching the
+                // database, so a malformed payload cannot half-restore.
+                // 先解析并校验全部分节，再动数据库，避免恢复中途失败。
+                final payload = parseBackupPayload(ctrl.text);
+                final credentials = readBackupRows(
+                  payload,
+                  BackupSection.credentials,
                 );
-                for (final row in credentials) {
-                  final id = row['id'] as String?;
-                  final secret = row['secret_data'] as String?;
-                  if (id == null || id.isEmpty) {
-                    throw FormatException('Invalid credential id');
-                  }
-                  if (secret != null &&
-                      secret.isNotEmpty &&
-                      secret != 'secure_storage') {
-                    await SecureStorage.saveCredential(id, secret);
-                  }
-                  await db.insert('tb_credentials', {
-                    ...row,
-                    'secret_data': 'secure_storage',
-                  }, conflictAlgorithm: ConflictAlgorithm.replace);
-                }
+                final hosts = readBackupRows(payload, BackupSection.hosts);
+                final snippets = readBackupRows(
+                  payload,
+                  BackupSection.snippets,
+                );
 
-                for (final table in ['tb_hosts', 'tb_snippets']) {
-                  for (final row in _readBackupRows(json, table, table)) {
-                    await db.insert(
-                      table,
+                final db = await ref.read(databaseProvider.future);
+                // One transaction for all three tables: either the whole
+                // restore commits, or nothing does.
+                // 三张表共用同一事务：要么全部写入，要么全部回滚。
+                await db.transaction((txn) async {
+                  for (final row in credentials) {
+                    final id = row['id'] as String?;
+                    final secret = row['secret_data'] as String?;
+                    if (id == null || id.isEmpty) {
+                      throw FormatException('Invalid credential id');
+                    }
+                    if (secret != null &&
+                        secret.isNotEmpty &&
+                        secret != 'secure_storage') {
+                      await SecureStorage.saveCredential(id, secret);
+                    }
+                    await txn.insert(
+                      BackupSection.credentials.table,
+                      {...row, 'secret_data': 'secure_storage'},
+                      conflictAlgorithm: ConflictAlgorithm.replace,
+                    );
+                  }
+
+                  // Merges by id, replacing duplicates; existing rows that are
+                  // not in the backup are left untouched.
+                  // 按 id 合并并覆盖重复项，备份中不存在的数据不会被删除。
+                  for (final row in hosts) {
+                    await txn.insert(
+                      BackupSection.hosts.table,
                       row,
                       conflictAlgorithm: ConflictAlgorithm.replace,
                     );
                   }
-                }
+                  for (final row in snippets) {
+                    await txn.insert(
+                      BackupSection.snippets.table,
+                      row,
+                      conflictAlgorithm: ConflictAlgorithm.replace,
+                    );
+                  }
+                });
+
                 ref.invalidate(hostListProvider);
                 ref.invalidate(credentialListProvider);
                 ref.invalidate(snippetListProvider);
@@ -316,24 +342,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         ],
       ),
     );
-  }
-
-  List<Map<String, dynamic>> _readBackupRows(
-    Map<String, dynamic> json,
-    String preferredKey,
-    String legacyKey,
-  ) {
-    final value = json[preferredKey] ?? json[legacyKey];
-    if (value == null) return const [];
-    if (value is! List) {
-      throw FormatException('Invalid backup field: $preferredKey');
-    }
-    return value.map((row) {
-      if (row is! Map) {
-        throw FormatException('Invalid row in backup field: $preferredKey');
-      }
-      return Map<String, dynamic>.from(row);
-    }).toList();
   }
 
   Future<void> _clearAllConfirm() async {
