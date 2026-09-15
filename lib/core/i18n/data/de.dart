@@ -410,4 +410,13 @@ const Map<String, String> deStrings = <String, String>{
   'transfer_clear_finished': 'Beendete entfernen',
   'transfer_unknown_size': 'Größe unbekannt',
   'transfer_error_local_io': 'Fehler bei lokaler Datei',
+  'known_hosts_title': 'Bekannte Hostschlüssel',
+  'known_hosts_sub': 'Akzeptierte Host-Identitäten',
+  'known_hosts_empty': 'Noch keine Hostschlüssel akzeptiert',
+  'known_hosts_hint':
+      'Wird ein Eintrag entfernt, fragt die nächste Verbindung zu diesem Host erneut nach. So erzwingen Sie eine erneute Prüfung, wenn Sie vermuten, dass ein Server ausgetauscht oder ein Schlüssel manipuliert wurde.',
+  'known_hosts_forget': 'Entfernen',
+  'known_hosts_forget_confirm':
+      'Schlüssel für {0} entfernen?\nDie nächste Verbindung fragt erneut nach.',
+  'known_hosts_trusted_at': 'Akzeptiert am',
 };

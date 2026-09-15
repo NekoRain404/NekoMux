@@ -391,4 +391,12 @@ const Map<String, String> koStrings = <String, String>{
   'transfer_clear_finished': '완료된 항목 지우기',
   'transfer_unknown_size': '크기 알 수 없음',
   'transfer_error_local_io': '로컬 파일 오류',
+  'known_hosts_title': '알려진 호스트 키',
+  'known_hosts_sub': '수락한 호스트 신원',
+  'known_hosts_empty': '아직 수락한 호스트 키가 없습니다',
+  'known_hosts_hint':
+      '기록을 삭제하면 다음 연결 시 다시 확인합니다. 서버가 교체되었거나 키가 변조된 것으로 의심될 때 앱이 다시 검증하게 하는 방법입니다.',
+  'known_hosts_forget': '기록 삭제',
+  'known_hosts_forget_confirm': '{0}의 키 기록을 삭제할까요?\n다음 연결 시 다시 확인합니다.',
+  'known_hosts_trusted_at': '수락 시각',
 };

@@ -406,4 +406,13 @@ const Map<String, String> enStrings = <String, String>{
   'transfer_clear_finished': 'Clear finished',
   'transfer_unknown_size': 'Unknown size',
   'transfer_error_local_io': 'Local file error',
+  'known_hosts_title': 'Known host keys',
+  'known_hosts_sub': 'Host identities you have accepted',
+  'known_hosts_empty': 'No host keys accepted yet',
+  'known_hosts_hint':
+      'Forgetting an entry makes the next connection to that host ask again. This is how you make the app re-verify a host you suspect was replaced or tampered with.',
+  'known_hosts_forget': 'Forget',
+  'known_hosts_forget_confirm':
+      'Forget the key for {0}?\nThe next connection to this host will ask again.',
+  'known_hosts_trusted_at': 'Accepted',
 };

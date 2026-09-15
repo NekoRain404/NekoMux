@@ -412,4 +412,13 @@ const Map<String, String> frStrings = <String, String>{
   'transfer_clear_finished': 'Effacer les terminés',
   'transfer_unknown_size': 'Taille inconnue',
   'transfer_error_local_io': 'Erreur de fichier local',
+  'known_hosts_title': 'Clés d’hôte connues',
+  'known_hosts_sub': 'Identités d’hôte acceptées',
+  'known_hosts_empty': 'Aucune clé d’hôte acceptée',
+  'known_hosts_hint':
+      'Oublier une entrée fera redemander la prochaine connexion à cet hôte. C’est ainsi que vous forcez l’application à revérifier un hôte que vous soupçonnez d’avoir été remplacé ou modifié.',
+  'known_hosts_forget': 'Oublier',
+  'known_hosts_forget_confirm':
+      'Oublier la clé de {0} ?\nLa prochaine connexion redemandera.',
+  'known_hosts_trusted_at': 'Acceptée le',
 };

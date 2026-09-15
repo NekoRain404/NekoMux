@@ -15,6 +15,7 @@ import '../services/backup_service.dart';
 import '../services/secure_storage.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
+import 'known_hosts_page.dart';
 import 'settings/backup_credentials.dart';
 import 'settings/backup_dialogs.dart';
 import 'settings/language_picker.dart';
@@ -188,6 +189,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
 
             Divider(height: 1, color: Theme.of(context).dividerColor),
+            SettingsSectionHeader(title: t('system')),
+            SettingsListTile(
+              icon: Icons.verified_user_outlined,
+              title: t('known_hosts_title'),
+              sub: t('known_hosts_sub'),
+              onTap: () => _openKnownHosts(),
+            ),
+
+            Divider(height: 1, color: Theme.of(context).dividerColor),
             SettingsSectionHeader(title: t('about_label')),
             const SettingsInfoTile(
               icon: Icons.info_outline,
@@ -208,6 +218,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   void _update(AppSettings s) =>
       ref.read(settingsProvider.notifier).updateSettings(s);
+
+  /// Opens the list of host keys the app has accepted.
+  /// 打开应用已接受的主机密钥列表。
+  ///
+  /// The row sits under "System", not inside the "About" block below it: what it
+  /// opens is not information about the app but the record of what the app will
+  /// trust on the next connection — and the one place in the app where that
+  /// trust can be taken back. Nothing on either side of this navigation can
+  /// relax host-key verification; see the page itself for why that is
+  /// deliberate.
+  /// 该行位于「系统」分节，而不是其下方的「关于」之中：它打开的不是应用自身的信息，
+  /// 而是应用在下次连接时会信任什么的记录——也是全应用唯一能收回这份信任的地方。
+  /// 这次跳转的两端都没有放松主机密钥校验的入口；为何刻意如此，见该页面本身。
+  Future<void> _openKnownHosts() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const KnownHostsPage()),
+    );
+  }
 
   /// Export all data as JSON and copy it to the clipboard.
   /// 导出全部数据为 JSON 并复制到剪贴板。

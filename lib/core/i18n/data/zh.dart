@@ -387,4 +387,11 @@ const Map<String, String> zhStrings = <String, String>{
   'transfer_clear_finished': '清除已结束',
   'transfer_unknown_size': '大小未知',
   'transfer_error_local_io': '本地文件错误',
+  'known_hosts_title': '已知主机密钥',
+  'known_hosts_sub': '已接受过的主机身份',
+  'known_hosts_empty': '尚未接受任何主机密钥',
+  'known_hosts_hint': '删除某条记录后，下次连接该主机会重新询问。当你怀疑服务器被替换或密钥被篡改时，这是让应用重新验证的办法。',
+  'known_hosts_forget': '删除记录',
+  'known_hosts_forget_confirm': '删除 {0} 的密钥记录？\n下次连接该主机时将重新询问。',
+  'known_hosts_trusted_at': '接受于',
 };

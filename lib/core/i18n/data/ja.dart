@@ -391,4 +391,12 @@ const Map<String, String> jaStrings = <String, String>{
   'transfer_clear_finished': '完了した項目を消去',
   'transfer_unknown_size': 'サイズ不明',
   'transfer_error_local_io': 'ローカルファイルのエラー',
+  'known_hosts_title': '既知のホスト鍵',
+  'known_hosts_sub': '承認済みのホスト識別情報',
+  'known_hosts_empty': '承認済みのホスト鍵はまだありません',
+  'known_hosts_hint':
+      '記録を削除すると、次回そのホストへ接続する際に再確認されます。サーバーが差し替えられた、または鍵が改ざんされた疑いがあるときに、アプリに再検証させる方法です。',
+  'known_hosts_forget': '記録を削除',
+  'known_hosts_forget_confirm': '{0} の鍵記録を削除しますか？\n次回の接続時に再確認されます。',
+  'known_hosts_trusted_at': '承認日時',
 };

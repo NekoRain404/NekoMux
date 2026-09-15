@@ -408,4 +408,13 @@ const Map<String, String> esStrings = <String, String>{
   'transfer_clear_finished': 'Borrar los terminados',
   'transfer_unknown_size': 'Tamaño desconocido',
   'transfer_error_local_io': 'Error de archivo local',
+  'known_hosts_title': 'Claves de host conocidas',
+  'known_hosts_sub': 'Identidades de host aceptadas',
+  'known_hosts_empty': 'Aún no se ha aceptado ninguna clave',
+  'known_hosts_hint':
+      'Olvidar una entrada hará que la próxima conexión a ese host vuelva a preguntar. Así obligas a la aplicación a reverificar un host que sospechas que fue sustituido o manipulado.',
+  'known_hosts_forget': 'Olvidar',
+  'known_hosts_forget_confirm':
+      '¿Olvidar la clave de {0}?\nLa próxima conexión volverá a preguntar.',
+  'known_hosts_trusted_at': 'Aceptada el',
 };
