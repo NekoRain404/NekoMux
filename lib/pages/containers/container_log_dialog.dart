@@ -15,8 +15,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/theme/app_fonts.dart';
 import '../../core/i18n/strings.dart';
 
 /// Fetches the log text to display; owned by the page, which holds the
@@ -59,7 +59,7 @@ Future<void> showContainerLogsDialog(
         '$containerName - ${t('logs')}',
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: GoogleFonts.jetBrainsMono(color: cs.onSurface, fontSize: 15),
+        style: AppFonts.monoText(color: cs.onSurface, fontSize: 15),
       ),
       content: SizedBox(
         width: double.maxFinite,
@@ -107,10 +107,7 @@ Future<void> showContainerLogsDialog(
               '$containerName - ${t('logs')}',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.jetBrainsMono(
-                color: cs.onSurface,
-                fontSize: 15,
-              ),
+              style: AppFonts.monoText(color: cs.onSurface, fontSize: 15),
             ),
           ),
           IconButton(
@@ -142,7 +139,7 @@ Future<void> showContainerLogsDialog(
           child: SingleChildScrollView(
             child: SelectableText(
               logText,
-              style: GoogleFonts.jetBrainsMono(
+              style: AppFonts.monoText(
                 color: cs.onSurface,
                 fontSize: 11,
                 height: 1.6,

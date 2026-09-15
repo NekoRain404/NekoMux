@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  google_fonts: ^6.1.0
   fl_chart: ^0.66.2
   sqflite: ^2.4.2+1
   path: ^1.9.1
@@ -27,3 +26,25 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Bundled typefaces. Declared here so the app never depends on reaching
+  # fonts.gstatic.com at startup — see lib/core/theme/app_fonts.dart.
+  # 随包分发的字体。在此声明，使应用启动时不再依赖能否连上 fonts.gstatic.com
+  # ——见 lib/core/theme/app_fonts.dart。
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-400.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-700.ttf
+          weight: 700
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-400.ttf
+          weight: 400
+        - asset: assets/fonts/JetBrainsMono-700.ttf
+          weight: 700

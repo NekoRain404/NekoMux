@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:xterm/xterm.dart';
+import '../core/theme/app_fonts.dart';
 import '../core/haptics.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
@@ -410,7 +410,7 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
                 '${host.alias} - ${t('connecting')}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.jetBrainsMono(
+                style: AppFonts.monoText(
                   color: cs.onSurface.withValues(alpha: 0.6),
                   fontSize: 13,
                 ),
@@ -435,10 +435,7 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
                 '${host.alias} (SSH)',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.jetBrainsMono(
-                  color: cs.onSurface,
-                  fontSize: 14,
-                ),
+                style: AppFonts.monoText(color: cs.onSurface, fontSize: 14),
               ),
             ),
           ],
@@ -448,7 +445,7 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
           '${host.alias} (SSH)',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: GoogleFonts.jetBrainsMono(color: cs.onSurface, fontSize: 14),
+          style: AppFonts.monoText(color: cs.onSurface, fontSize: 14),
         );
     }
     return AppBar(

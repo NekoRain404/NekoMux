@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+
+import 'app_fonts.dart';
 
 /// Theme definitions for the app. Each theme has both dark and light variants.
 /// アプリのテーマ定義。各テーマにダークとライトの両バリアントを持ちます。
@@ -87,7 +88,8 @@ class AppThemeDef {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
-        titleTextStyle: GoogleFonts.inter(
+        titleTextStyle: TextStyle(
+          fontFamily: AppFonts.sans,
           color: t1,
           fontSize: 17,
           fontWeight: FontWeight.w600,
@@ -143,13 +145,13 @@ class AppThemeDef {
         hintStyle: TextStyle(color: t2.withValues(alpha: 0.68)),
       ),
       textTheme:
-          GoogleFonts.interTextTheme(
-            isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
-          ).copyWith(
-            bodyLarge: TextStyle(color: t1),
-            bodyMedium: TextStyle(color: t2),
-            titleMedium: TextStyle(color: t1, fontWeight: FontWeight.w600),
-          ),
+          (isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme)
+              .apply(fontFamily: AppFonts.sans)
+              .copyWith(
+                bodyLarge: TextStyle(color: t1),
+                bodyMedium: TextStyle(color: t2),
+                titleMedium: TextStyle(color: t1, fontWeight: FontWeight.w600),
+              ),
       iconTheme: IconThemeData(color: t2),
       dividerColor: borderColor,
       bottomSheetTheme: BottomSheetThemeData(

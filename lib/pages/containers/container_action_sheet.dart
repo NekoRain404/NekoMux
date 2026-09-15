@@ -8,8 +8,8 @@
 // 而页面是唯一持有 SSH 连接的地方。
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/theme/app_fonts.dart';
 import '../../core/haptics.dart';
 import '../../core/i18n/strings.dart';
 import '../../widgets/app_ui.dart';
@@ -86,7 +86,7 @@ void showContainerActionSheet(
                 container.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.jetBrainsMono(
+                style: AppFonts.monoText(
                   color: cs.onSurface,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
