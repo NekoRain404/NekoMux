@@ -1,0 +1,1761 @@
+<title>NekoMux 缺陷清单</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap">
+<style>
+  /* ---------------------------------------------------------------
+     Tokens: NekoMux 自己的设计语言 (app_theme.dart / app_colors.dart)
+     bare :root = light palette; dark redefined twice below.
+     --------------------------------------------------------------- */
+  :root {
+    --bg:        #F4F6F2;
+    --surface:   #FFFFFF;
+    --surface-2: #EDF1EA;
+    --border:    #DDE4DA;
+    --border-hi: #C3CFC0;
+    --text:      #243027;
+    --muted:     #647066;
+    --faint:     #8A9689;
+    --accent:    #3F6B45;
+    --accent-bg: #E4EEE2;
+
+    /* semantic severity — 独立于 accent 的色系 */
+    --p0:        #A93F33;  --p0-bg:   #F7E4E1;
+    --p1:        #7E5A0E;  --p1-bg:   #F6ECD6;
+    --p2:        #3C6472;  --p2-bg:   #E1ECF0;
+    --p3:        #5C665B;  --p3-bg:   #EAEDE8;
+    --ok:        #3F6B45;  --ok-bg:   #E4EEE2;
+
+    --sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "Noto Sans Mono CJK SC", ui-monospace, "SFMono-Regular", "Menlo", monospace;
+    --radius: 8px;
+    --wrap: 1120px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #101612;
+      --surface:   #182019;
+      --surface-2: #1E271F;
+      --border:    #2B372D;
+      --border-hi: #3C4A3E;
+      --text:      #E3E7DA;
+      --muted:     #9EA894;
+      --faint:     #7C8779;
+      --accent:    #8FBC8B;
+      --accent-bg: #1F2A20;
+
+      --p0:        #D77A6F;  --p0-bg:   #2E1D1B;
+      --p1:        #D8A657;  --p1-bg:   #2C2617;
+      --p2:        #82A6B1;  --p2-bg:   #1A2429;
+      --p3:        #9AA396;  --p3-bg:   #212922;
+      --ok:        #8FBC8B;  --ok-bg:   #1F2A20;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #101612;
+    --surface:   #182019;
+    --surface-2: #1E271F;
+    --border:    #2B372D;
+    --border-hi: #3C4A3E;
+    --text:      #E3E7DA;
+    --muted:     #9EA894;
+    --faint:     #7C8779;
+    --accent:    #8FBC8B;
+    --accent-bg: #1F2A20;
+
+    --p0:        #D77A6F;  --p0-bg:   #2E1D1B;
+    --p1:        #D8A657;  --p1-bg:   #2C2617;
+    --p2:        #82A6B1;  --p2-bg:   #1A2429;
+    --p3:        #9AA396;  --p3-bg:   #212922;
+    --ok:        #8FBC8B;  --ok-bg:   #1F2A20;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    padding-block: 0 96px;
+    padding-inline: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: var(--wrap); margin-inline: auto; }
+
+  /* ---------------- masthead ---------------- */
+  .masthead { padding-block: 44px 30px; border-bottom: 1px solid var(--border); }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 16px;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  h1 {
+    font-size: clamp(28px, 5vw, 44px);
+    font-weight: 900;
+    letter-spacing: -.02em;
+    line-height: 1.15;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    max-width: 62ch;
+    color: var(--muted);
+    margin: 0 0 22px;
+    font-size: 15px;
+  }
+
+  .subject {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    font-size: 12px;
+    color: var(--faint);
+  }
+  .subject b {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .subject span { font-family: var(--mono); font-size: 11.5px; }
+
+  /* ---------------- stat strip ---------------- */
+  .strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-block: 26px;
+  }
+  .stat {
+    background: var(--surface);
+    padding: 14px 16px;
+    border: 0;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: background .12s;
+  }
+  .stat:hover { background: var(--surface-2); }
+  .stat[aria-pressed="true"] { background: var(--surface-2); box-shadow: inset 0 -2px 0 currentColor; }
+  .stat .n {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .k { font-size: 11.5px; color: var(--muted); letter-spacing: .02em; }
+  .stat[data-sev="P0"] .n { color: var(--p0); }
+  .stat[data-sev="P1"] .n { color: var(--p1); }
+  .stat[data-sev="P2"] .n { color: var(--p2); }
+  .stat[data-sev="P3"] .n { color: var(--p3); }
+  .stat[data-sev="ALL"] .n { color: var(--text); }
+
+  /* ---------------- progress ---------------- */
+  .progress-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 16px 18px;
+    margin-block: 0 30px;
+  }
+  .progress-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .progress-top .label { font-size: 12.5px; color: var(--muted); }
+  .progress-top .count {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .track {
+    height: 6px;
+    border-radius: 99px;
+    background: var(--surface-2);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .fill {
+    height: 100%;
+    width: 0%;
+    background: var(--ok);
+    border-radius: 99px;
+    transition: width .25s ease;
+  }
+  .progress-hint { font-size: 11.5px; color: var(--faint); margin: 10px 0 0; }
+  .reset {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--faint);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .reset:hover { color: var(--text); }
+
+  /* ---------------- toolbar ---------------- */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+    padding-block: 12px;
+    margin-bottom: 8px;
+  }
+  .toolbar-inner {
+    max-width: var(--wrap);
+    margin-inline: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .search {
+    flex: 1 1 220px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 7px 11px;
+  }
+  .search:focus-within { border-color: var(--accent); }
+  .search svg { flex: none; color: var(--faint); }
+  .search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    outline: none;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .search input::placeholder { color: var(--faint); }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .04em;
+    padding: 5px 10px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .chip:hover { border-color: var(--border-hi); color: var(--text); }
+  .chip[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+  /* ---------------- sections ---------------- */
+  .tier { margin-top: 42px; scroll-margin-top: 76px; }
+  .tier-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .tier-head h2 {
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    margin: 0;
+  }
+  .tier-head .note { font-size: 12.5px; color: var(--muted); flex: 1 1 260px; }
+  .tier-head .tally {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 99px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------------- finding ---------------- */
+  .f {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: 0 18px;
+    padding-block: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .f[hidden] { display: none; }
+
+  .f-rail { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+
+  .sev {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid currentColor;
+  }
+  .sev-p0 { color: var(--p0); background: var(--p0-bg); }
+  .sev-p1 { color: var(--p1); background: var(--p1-bg); }
+  .sev-p2 { color: var(--p2); background: var(--p2-bg); }
+  .sev-p3 { color: var(--p3); background: var(--p3-bg); }
+
+  .f-id {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--faint);
+    letter-spacing: .02em;
+  }
+
+  .f-main { min-width: 0; }
+
+  .f-title {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.4;
+    margin: 0 0 9px;
+    letter-spacing: -.005em;
+    text-wrap: balance;
+  }
+
+  .f-refs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+  .f-refs code {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .f-refs code b { color: var(--text); font-weight: 500; }
+
+  .f-body { margin: 0; display: grid; gap: 9px; }
+  .f-row { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: start; }
+  .f-row dt {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    color: var(--faint);
+    padding-top: 2px;
+  }
+  .f-row dd { margin: 0; font-size: 14px; color: var(--text); min-width: 0; }
+  .f-row dd.impact { color: var(--muted); }
+  .f-row dd code, .f-row dd .m {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    color: var(--text);
+    word-break: break-word;
+  }
+  .f-row dd .fix { color: var(--ok); }
+
+  /* checkbox */
+  .mark { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+  .mark input {
+    appearance: none;
+    width: 17px; height: 17px;
+    flex: none;
+    border: 1.5px solid var(--border-hi);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+    position: relative;
+    transition: all .12s;
+  }
+  .mark input:checked { background: var(--ok); border-color: var(--ok); }
+  .mark input:checked::after {
+    content: "";
+    position: absolute;
+    left: 5px; top: 1.5px;
+    width: 4px; height: 9px;
+    border: solid var(--bg);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .mark input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mark span { font-size: 10.5px; color: var(--faint); font-family: var(--mono); }
+  .f.done { opacity: .5; }
+  .f.done .f-title { text-decoration: line-through; text-decoration-color: var(--faint); }
+
+  /* ---------------- closing sections ---------------- */
+  .panel {
+    margin-top: 46px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 22px 24px;
+  }
+  .panel h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; letter-spacing: -.01em; }
+  .panel > p.note { font-size: 13px; color: var(--muted); margin: 0 0 16px; max-width: 68ch; }
+
+  .panel ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 11px; }
+  .panel li {
+    padding-left: 22px;
+    position: relative;
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .panel li::before {
+    content: "—";
+    position: absolute;
+    left: 0;
+    color: var(--faint);
+  }
+  .panel li b, .panel li strong { color: var(--text); font-weight: 600; }
+  .panel li code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    color: var(--text);
+  }
+
+  ol.order { margin: 0; padding-left: 0; list-style: none; counter-reset: step; display: grid; gap: 10px; }
+  ol.order li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 12px;
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  ol.order li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: 3px;
+  }
+  ol.order li b { color: var(--text); font-weight: 600; }
+
+  .empty {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--faint);
+    font-size: 13.5px;
+  }
+  .empty[hidden] { display: none; }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--faint);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  footer code { font-family: var(--mono); }
+
+  @media (max-width: 620px) {
+    .f { grid-template-columns: 1fr; gap: 12px; }
+    .f-rail { flex-direction: row; align-items: center; gap: 10px; }
+    .f-row { grid-template-columns: 1fr; gap: 2px; }
+    .f-row dt { padding-top: 6px; }
+    .masthead { padding-block: 30px 22px; }
+    .panel { padding: 18px 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">代码审计 · 已验证</p>
+    <h1>NekoMux 缺陷清单</h1>
+    <p class="standfirst">
+      对一个 Flutter SSH / SFTP 服务器管理工具的全面审计。每条都回到源码逐行核对过，
+      关键几条另外跑了真实命令或解析器副本来验证。按严重度排序，附 <code>file:line</code> 与修复方向。
+    </p>
+    <div class="subject">
+      <span><b>代号</b> neko_mux 1.0.0+1</span>
+      <span><b>规模</b> 16,632 行 Dart · 40 个文件</span>
+      <span><b>工具链</b> Flutter 3.44.0 · Dart 3.12.0</span>
+      <span><b>日期</b> 2026-09-15</span>
+    </div>
+  </header>
+
+  <div class="strip" id="stats"></div>
+
+  <div class="progress-card">
+    <div class="progress-top">
+      <span class="label">已修复</span>
+      <span class="count"><span id="done">0</span> / <span id="total">0</span></span>
+    </div>
+    <div class="track"><div class="fill" id="fill"></div></div>
+    <p class="progress-hint">
+      勾选状态保存在本机浏览器，方便你逐条推进。 <button class="reset" id="reset" type="button">清空勾选</button>
+    </p>
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-inner">
+      <label class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.6-3.6"></path>
+        </svg>
+        <input type="search" id="q" placeholder="搜索文件名、函数名或关键词…" aria-label="搜索缺陷">
+      </label>
+      <div class="chips" id="chips">
+        <button class="chip" type="button" data-sev="ALL" aria-pressed="true">全部</button>
+        <button class="chip" type="button" data-sev="P0" aria-pressed="false">P0</button>
+        <button class="chip" type="button" data-sev="P1" aria-pressed="false">P1</button>
+        <button class="chip" type="button" data-sev="P2" aria-pressed="false">P2</button>
+        <button class="chip" type="button" data-sev="P3" aria-pressed="false">P3</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="empty" id="empty" hidden>没有匹配的条目。</p>
+
+  <!-- ══════════════════ P0 ══════════════════ -->
+  <section class="tier" data-tier="P0">
+    <div class="tier-head">
+      <h2>P0 · 安全与数据丢失</h2>
+      <span class="note">会造成密钥泄漏、备份失效或凭据损毁。建议优先处理。</span>
+      <span class="tally" style="color:var(--p0);background:var(--p0-bg)">6 条</span>
+    </div>
+
+    <article class="f" data-sev="P0" data-id="sec-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="sec-1" aria-label="标记 sec-1 已修复"><span></span></label>
+        <span class="sev sev-p0">P0</span>
+        <span class="f-id">sec-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">主机密钥验证在 6 处连接点被完全跳过</h3>
+        <div class="f-refs">
+          <code>ssh_service.dart:158</code><code>home_page.dart:60</code><code>host_console_page.dart:75</code>
+          <code>task_manager_page.dart:73</code><code>container_shell_page.dart:79</code><code>systemd_page.dart:69</code>
+          <code>ssh_provider.dart:27</code>
+        </div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>dartssh2 在回调为 null 时直接放行：<code>onVerifyHostKey != null ? onVerifyHostKey!(...) : true</code>（<code>ssh_transport.dart:1191</code>）。全项目 8 个连接点里只有 <code>ssh_terminal_page.dart:112</code> 和 <code>sftp_page.dart:82</code> 传了 <code>onHostKeyVerify</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">首页探测、主机控制台、进程管理、systemd、容器全部静默信任任意主机密钥——中间人可以完整接管这些会话，而用户看不到任何提示。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">把这 6 处都补上回调</span>；更稳妥的做法是把校验收进 <code>SshConnection</code> 内部，让调用方<b>无法</b>漏传。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P0" data-id="data-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="data-1" aria-label="标记 data-1 已修复"><span></span></label>
+        <span class="sev sev-p0">P0</span>
+        <span class="f-id">data-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">恢复备份会静默丢掉所有主机与代码片段</h3>
+        <div class="f-refs"><code>settings_page.dart:285</code><code>settings_page.dart:326</code><code>settings_page.dart:200</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>导出写的键是 <code>hosts</code> / <code>credentials</code> / <code>snippets</code>，恢复却把<b>表名</b>当键查：<code>_readBackupRows(json, table, table)</code> 取的是 <code>json['tb_hosts']</code>，恒为 null → 返回 <code>const []</code>。凭据那一支用的是 <code>'credentials'</code>，所以只有凭据能恢复。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">导出 → 清空数据 → 恢复 → 弹出「数据恢复成功」，凭据回来了，<b>主机和片段永久消失且没有任何报错</b>。文档里宣传的备份闭环实际是坏的。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">两个键名改成 <code>'hosts'</code> / <code>'snippets'</code></span>——一个词，挽回永久数据丢失。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P0" data-id="data-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="data-2" aria-label="标记 data-2 已修复"><span></span></label>
+        <span class="sev sev-p0">P0</span>
+        <span class="f-id">data-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">编辑凭据时占位符是真实文本，输入会拼接并覆盖原密钥</h3>
+        <div class="f-refs"><code>add_credential_page.dart:52</code><code>add_credential_page.dart:130</code><code>add_credential_page.dart:299</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>controller 的初值被设成 <span class="m">••••••••</span>（不是 hint），而 <code>:130</code> 靠 <code>text == '••••••••'</code> 判断「用户没改，沿用旧密钥」。密码框是 <code>obscureText: true</code>，所以 8 位密码和占位符外观完全相同，用户无法分辨。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">编辑密码凭据 → 点进密码框（光标落在点击处）→ 输入新密码 → 字段变成 <span class="m">••••••••newpass</span> → 守卫失效 → <b>损坏的字符串写进 secure storage 并落库</b>，列表提示「已更新」，之后所有连接认证失败，原密码无法找回。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">用 hintText 或独立的「已设置」状态表达，不要把占位符写进 value</span>；或进入编辑时清空字段、要求显式重填。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P0" data-id="data-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="data-3" aria-label="标记 data-3 已修复"><span></span></label>
+        <span class="sev sev-p0">P0</span>
+        <span class="f-id">data-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">切换认证方式会复用旧密钥，存出类型与内容不匹配的凭据</h3>
+        <div class="f-refs"><code>add_credential_page.dart:263</code><code>add_credential_page.dart:107</code><code>add_credential_page.dart:310</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>认证方式卡片只翻 <code>_authType</code>，密钥 controller 不动；而「占位符 ⇒ 沿用旧密钥」这条路径不区分类型是否变了。<code>:107</code> 的私钥校验器对占位符直接 <code>return null</code>（永远通过）。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">把密码凭据改成密钥认证 → 校验全过 → 存成 <code>auth_type=1</code> 且密钥内容 = 原密码 → 列表显示「私钥」徽章，<code>SSHKeyPair.fromPem("hunter2")</code> 必然失败。反方向（密钥改成密码）同理。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">切换认证类型时清空密钥字段并清除「沿用旧密钥」标记。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P0" data-id="sec-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="sec-2" aria-label="标记 sec-2 已修复"><span></span></label>
+        <span class="sev sev-p0">P0</span>
+        <span class="f-id">sec-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">导出备份把明文密码与私钥写进系统剪贴板</h3>
+        <div class="f-refs"><code>settings_page.dart:201</code><code>settings_page.dart:204</code><code>credential.dart:61</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>toBackupMap()</code> 含原始 <code>secretData</code>（解密后的密码 / 完整 PEM），整份 JSON 经 <code>Clipboard.setData</code> 进入系统剪贴板。导出提示只说「已复制到剪贴板」，从不说明里面包含密钥。凭据本来只存 secure storage、DB 里只写 <code>'secure_storage'</code> 占位——这一步把整套设计作废。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">剪贴板对所有 App 可见、会被输入法或剪贴板历史留存；用户还会自然地把它粘进聊天或备忘录来跨设备搬运——一次备份等于把全部服务器口令摊开。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">改走 SAF（ACTION_CREATE_DOCUMENT）写成用户选定位置的文件</span>；默认导出脱敏版本，包含密钥需显式勾选并给出明确警告。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P0" data-id="sec-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="sec-3" aria-label="标记 sec-3 已修复"><span></span></label>
+        <span class="sev sev-p0">P0</span>
+        <span class="f-id">sec-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">未禁用 Android 自动备份，恢复后首页被异常占满</h3>
+        <div class="f-refs"><code>AndroidManifest.xml:3</code><code>secure_storage.dart:30</code><code>providers.dart:85</code><code>home_page.dart:147</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>manifest 没有 <code>allowBackup="false"</code>。flutter_secure_storage 官方 README 明确告警：云备份恢复后会抛 <code>InvalidKeyException: Failed to unwrap key</code>，因为 Keystore 密钥是设备绑定的、不随备份走。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">换机或恢复后每条凭据读取都抛异常 → <code>credentialListProvider.build()</code> 失败 → <code>hostListProvider</code> 也失败（它在 await 前者）→ <b>首页正文变成一行原始异常</b>，无恢复入口，且每次启动都复现。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">加 <code>android:allowBackup="false"</code></span>，并给凭据读取失败补一条降级路径（列出主机、标记凭据不可读、引导重新输入）。</dd></div>
+        </dl>
+      </div>
+    </article>
+  </section>
+
+  <!-- ══════════════════ P1 ══════════════════ -->
+  <section class="tier" data-tier="P1">
+    <div class="tier-head">
+      <h2>P1 · 功能失效与连接泄漏</h2>
+      <span class="note">假数据、假成功、设置不生效，以及在服务器上堆积的孤儿会话。</span>
+      <span class="tally" style="color:var(--p1);background:var(--p1-bg)">27 条</span>
+    </div>
+
+    <article class="f" data-sev="P1" data-id="fail-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-1" aria-label="标记 fail-1 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">free -m 在非英文 locale 下解析失败，内存永远显示 0%</h3>
+        <div class="f-refs"><code>monitoring_service.dart:118</code><code>monitoring_service.dart:54</code><code>host_console_page.dart:148</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>parseFree</code> 用 <code>line.startsWith('Mem:')</code> 匹配，而 <code>free</code> 是 gettext 本地化的——中文环境下输出的是 <span class="m">内存：</span>（全角冒号）。全项目没有任何地方强制 <code>LC_ALL=C</code>。已在实机验证：<code>LC_ALL=zh_CN.UTF-8 free -m</code> 的行首是 <span class="m">内存：</span>，<code>startsWith('Mem:')</code> 为 false。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">中文服务器上 CPU（走 <code>/proc/stat</code>，不受影响）正常，但内存恒为 0.0%、折线图平在 0；而 <code>catch (_) {}</code> 吞掉一切，<b>用户无从得知数据是假的</b>。对中文用户而言监控主功能直接失效。<code>parseTop</code> 的 <code>line.contains('Mem') &amp;&amp; ...('total')</code> 同理。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">命令改成 <code>LC_ALL=C free -m</code></span>，或按列位置解析而不是匹配本地化标签。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-2" aria-label="标记 fail-2 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">parseSystemctl 丢弃全部 failed 单元，「失败」筛选与计数形同虚设</h3>
+        <div class="f-refs"><code>monitoring_service.dart:206</code><code>systemd_page.dart:29</code><code>systemd_page.dart:119</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>代码主动 <code>continue</code> 掉 <span class="m">●</span> 开头的行，而 systemd 正是用 <span class="m">●</span> 标记 failed / not-found，且 <code>--no-legend</code> 并不抑制它。实机验证：<code>list-units</code> 输出里 19 行带 <span class="m">●</span>，其中 7 行是 <code>failed failed</code>；对真实输出跑解析器副本，<b><code>active==failed</code> 的行数为 0</b>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">服务崩溃后「失败」统计恒为 0、筛选点击后是空列表、该服务根本不出现在列表里——<b>也就无法点进去 Restart</b>，而这正是这个页面存在的意义。<code>systemd_page.dart:29</code> 的 <code>_failed</code> 与 <code>:119</code> 的分支因此是死代码。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">不要跳过 <span class="m">●</span> 行，改为剥掉前缀后正常解析</span>（这些行同样含 load / active / sub 列）。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-7">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-7" aria-label="标记 fail-7 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-7</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">首页探测是自触发的无限循环，App 全生命周期持续重连</h3>
+        <div class="f-refs"><code>home_page.dart:153</code><code>home_page.dart:38</code><code>providers.dart:178</code><code>home_page.dart:63</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>三个条件叠成闭环：<code>data:</code> builder 每次重建都调 <code>_scheduleStatusProbe</code>；postFrameCallback 在 <code>await _probeHosts</code> <b>之前</b>就把 <code>_probeScheduled</code> 清掉；<code>setOnline</code> 每次 <code>map</code> 都造新 List 实例，<code>AsyncData</code> 相等性永远为 false → 必通知 → 又重建。两个守卫都拦不住（<code>_probeScheduled</code> 在探测前清、<code>_isProbing</code> 在下一帧到来前清）。已用项目实际的 riverpod 实测：连续三次内容相同的 <code>setOnline</code> 产生三次独立通知。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">只要存了 ≥1 台主机，App 就在后台<b>无限循环</b>地对每台主机做完整 TCP + 认证 + <b>分配登录 shell</b>，每台 ≤4 秒。抽屉用 <code>popUntil(route.isFirst)</code>，HomePage 永驻路由栈底，切到设置页也照跑。持续耗电耗流量，服务器上每秒一条新登录记录，<b>触发 fail2ban 封 IP 是现实风险</b>。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">加 <code>_lastProbeAt</code> 节流（或仅在主机 id 集合变化时重探），并让 <code>setOnline</code> 在值未变时直接 return。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="leak-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="leak-1" aria-label="标记 leak-1 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">leak-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">连接过程中离开页面，会在服务器上留下无人关闭的已认证会话</h3>
+        <div class="f-refs"><code>ssh_service.dart:139</code><code>ssh_service.dart:235</code><code>host_console_page.dart:215</code><code>task_manager_page.dart:50</code><code>systemd_page.dart:46</code><code>container_shell_page.dart:44</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>connect()</code> 在每个 <code>await</code> <b>之后</b>才赋值 <code>_client</code> / <code>_session</code>，而 <code>dispose()</code> 里四个 <code>?.</code> 调用在那一刻全为 null → 空操作。续体随后把它们建起来，<code>_setState(connected)</code> 还无条件执行。<code>_disposed</code> 只抑制输出流，不阻止连接继续。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">在连接窗口（TCP + 握手，300ms–2s，公网更长）内返回，页面没了但服务器上多一个已认证会话和一个登录 shell，永远无人关闭。重复约 10 次（<code>MaxSessions</code> 默认值）后 sshd 开始拒绝新通道——<b>App 的连接、控制台、进程、systemd、容器全部开始报错</b>，服务器上堆着孤儿 bash。四个页面都中招。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">在 <code>connect()</code> 的每个 <code>await</code> 之后检查 <code>_disposed</code>，已销毁则清理并退出</span>；<code>dispose()</code> 置一个取消标志，续体据此收敛。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="leak-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="leak-2" aria-label="标记 leak-2 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">leak-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">终端页同一根因：连接中返回即泄漏；双击重连还会产生重叠连接</h3>
+        <div class="f-refs"><code>ssh_terminal_page.dart:161</code><code>ssh_terminal_page.dart:140</code><code>ssh_terminal_page.dart:396</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>dispose()</code> 调 <code>_disconnect()</code>，而 <code>SshConnection.disconnect()</code> 同样只关闭已存在的 <code>_session</code> / <code>_client</code>，也不设取消标志；页面从不调用 <code>SshConnection.dispose()</code>。另外 <code>:396</code> 的「一键重连」没有在途守卫。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">同 leak-1：服务器上留下已认证会话 + 登录 shell。快速双击「一键重连」会启动两个重叠的 <code>_connect()</code>，其中一个连接会被另一次调用取消订阅后孤立，结果相同。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">同 leak-1，并给重连按钮加重入守卫。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="leak-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="leak-3" aria-label="标记 leak-3 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">leak-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">SFTP 页同一根因，且 dispose 时服务可能还是 null</h3>
+        <div class="f-refs"><code>sftp_page.dart:92</code><code>sftp_page.dart:67</code><code>sftp_page.dart:79</code><code>sftp_page.dart:104</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>两条路径：若在 <code>await ref.read(credentialListProvider.future)</code> 期间返回，<code>_sftpService</code> 仍为 null，<code>dispose()</code> 什么都不做，<code>_resolveAndConnect</code> 随后才构造服务并在<b>已销毁的页面</b>上连接；若在 <code>await connect()</code> 期间返回，<code>_cleanup()</code> 把还是 null 的 <code>_sftp</code> / <code>_client</code> 置空，续体再赋值 → 活的 SSH + SFTP 会话。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">每次被放弃的连接都在服务器上留一个已认证 SSH 会话加 SFTP 子系统，直到 App 结束。SFTP 超时 10 秒，窗口很宽，慢主机上是常态。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">同 leak-1，并让 <code>dispose</code> 置一个「已销毁」标志供续体检查。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-4">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-4" aria-label="标记 fail-4 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-4</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">systemd 启停 / 启用永远报成功（从不检查退出码）</h3>
+        <div class="f-refs"><code>systemd_page.dart:132</code><code>ssh_service.dart:88</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>executeCommand</code> 只返回 <code>'$out\n$err'</code>，从不检查退出码（dartssh2 的 <code>SSHSession.exitCode</code> 被完全忽略），失败与成功在返回值上不可区分。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">以非 root 用户停 <code>docker.service</code>，systemctl 返回 <code>Interactive authentication required.</code>，App 却弹绿色「docker.service: 停止 ✓」，刷新后服务仍在运行。<code>enable</code> / <code>disable</code> 同理——用户会以为持久化改动已经生效。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">让 <code>executeCommand</code> 返回退出码（或失败时抛异常），据此判定成败。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-5">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-5" aria-label="标记 fail-5 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-5</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">进程管理 kill 失败仍提示「已终止」并把该行移除</h3>
+        <div class="f-refs"><code>task_manager_page.dart:145</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>同 fail-4 的根因；并且 UI 在命令返回后无条件 <code>removeWhere</code> 掉那一行。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">非 root 用户杀 root 进程，远端返回 <code>kill: (1) - Operation not permitted</code>，App 移除该行并提示「Killed PID 1」，<b>进程其实还活着</b>——不刷新的话用户会一直以为杀掉了。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">依据退出码决定是否移除行与提示文案。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-6">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-6" aria-label="标记 fail-6 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-6</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">容器操作用「输出里是否含 error 子串」判定失败</h3>
+        <div class="f-refs"><code>container_shell_page.dart:206</code><code>container_shell_page.dart:316</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>result.contains('Error') || result.contains('error')</code> 是对 stdout + stderr 的子串启发式，不是退出码。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">容器名叫 <code>error-logger</code> 时，<code>docker stop</code> 成功但输出含容器名 → 报「操作失败」并跳过后续刷新，卡片一直显示 running，用户以为停止失败了。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">改用退出码判断。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-8">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-8" aria-label="标记 fail-8 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-8</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">四个设置项存了但从不读取，开关给用户虚假的控制感</h3>
+        <div class="f-refs"><code>settings_page.dart:78</code><code>settings_page.dart:105</code><code>settings_page.dart:116</code><code>settings_page.dart:135</code><code>home_page.dart:63</code><code>add_host_page.dart:54</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>terminalFontSize</code> / <code>defaultPort</code> / <code>connectTimeout</code> / <code>hapticEnabled</code> 都写进了 <code>tb_settings</code>，但全项目除 <code>settings_provider</code> 与 <code>settings_page</code> 外没有任何读取点（已 grep 确认）。<code>connectTimeout</code> 唯一使用处 <code>home_page.dart:63</code> 硬编码 4 秒，其余页面用 <code>ssh_service</code> 的默认 10 秒；<code>HapticFeedback</code> 在 6 个页面无条件调用。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">默认端口设成 2222 后再加主机，端口框仍预填 22 → 保存到 22 → 测试连接失败；把超时调到 30 秒，连接仍在 4 / 10 秒中断；字号滑块毫无效果；关掉触觉反馈没有任何变化。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">要么接线到各自的使用点，要么从设置页移除</span>——装饰性开关比缺功能更伤信任。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-9">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-9" aria-label="标记 fail-9 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-9</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">语言设置在冷启动后失效，8 种语言翻译拿不到</h3>
+        <div class="f-refs"><code>strings.dart:8</code><code>theme_provider.dart:70</code><code>settings_page.dart:370</code><code>app.dart:18</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>AppStrings.currentLang</code> 是静态字段、默认 <code>'zh'</code>，只在 <code>LanguageNotifier.build()</code> 里赋值；而 <code>languageProvider</code> 全项目只在 <code>settings_page.dart:370</code> 被 <code>read</code> 一次，<code>app.dart</code> 从不 watch 它，启动路径也不会触发它的 build。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">选完日本語（或其余 7 种中的任一种）重启后回到中文，直到再进一次设置页。<code>_strings</code> 里已经<b>完整翻译了 314 个 key × 8 种语言 = 2512 条</b>，全部拿不到。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">在 <code>app.dart</code> watch <code>languageProvider</code></span>（或改用 AppLocalizations），并在启动时先读一次设置再构建 UI。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-10">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-10" aria-label="标记 fail-10 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-10</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">三个 i18n key 未定义，校验提示直接把 key 名显示给用户</h3>
+        <div class="f-refs"><code>add_credential_page.dart:242</code><code>add_credential_page.dart:294</code><code>add_credential_page.dart:312</code><code>strings.dart:14</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>must_enter_name</code> / <code>must_enter_username</code> / <code>must_enter_password</code> 被引用但不在 <code>_strings</code> 里（<code>must_enter_alias</code>、<code>must_enter_ip</code> 是有定义的），而 <code>t()</code> 的回落是 <code>?? key</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">凭据表单的校验提示直接显示 <code>must_enter_name</code> 这样的英文 key 名。另 <code>strings.dart:183</code> 的 <code>mustEnterKey</code> getter 同样缺失且无引用。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">补三条翻译，并考虑让 <code>t()</code> 在缺失时回落到默认语言而不是返回 key。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-11">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-11" aria-label="标记 fail-11 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-11</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">「本地终端」是纯 mock，用假数据冒充功能</h3>
+        <div class="f-refs"><code>local_shell_page.dart:125</code><code>local_shell_page.dart:46</code><code>app_drawer.dart:90</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_executeCommand</code> 是个 <code>switch</code>，按命令名返回硬编码文本：<code>whoami</code> → <code>'termux'</code>，<code>uname -a</code> → 伪造的 <span class="m">Linux localhost 5.10.189-android13+ …</span>，<code>ls</code> → <code>_mockFiles</code> 常量。没有任何真实进程执行路径（无 <code>Process.start</code> 等）。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">它作为「本地终端」摆在抽屉里，输入 <code>ls</code> 会看到假文件列表，<code>uname -a</code> 返回假内核版本。这不是缺功能，是<b>用假数据冒充功能</b>——对以排障为卖点的工具是信任问题。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">接真实实现（仓库里那份 termux-app 克隆很可能就是为此准备的），或直接移除入口。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-12">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-12" aria-label="标记 fail-12 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-12</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">PTY 从不 resize，resizeTerminal 全项目零调用方</h3>
+        <div class="f-refs"><code>ssh_terminal_page.dart:52</code><code>ssh_service.dart:170</code><code>ssh_service.dart:213</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>页面设置了 <code>_terminal.onOutput</code> 却从没设置 <code>_terminal.onResize</code>；PTY 在连接时固定 <code>120×40</code>，而手机实际约 40–60 列。grep 确认 <code>resizeTerminal</code> 没有任何调用方。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">远端 shell 认为自己有 120 列，输出在错误的列宽换行，<code>htop</code> / <code>vim</code> / <code>less</code> 等全屏程序渲染错乱——经典的「没有 resize」症状。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">加一行 <code>_terminal.onResize = (w, h, _, _) =&gt; _connection?.resizeTerminal(w, h);</code></span>，并在重连后重新下发一次当前尺寸。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-1" aria-label="标记 state-1 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">SFTP 并发加载无请求令牌，面包屑与文件列表会不一致</h3>
+        <div class="f-refs"><code>sftp_page.dart:150</code><code>sftp_page.dart:791</code><code>sftp_page.dart:221</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_loadFilesForPath</code> 没有请求令牌：谁最后返回谁覆盖 <code>_files</code>，而先返回的那个会提前把 <code>_isLoadingDir</code> 清掉。面包屑在加载期间仍可点击，所以两次加载能真实重叠。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">点进慢目录（如 <code>/var/log</code>）后立刻点根面包屑，若 <code>/</code> 先返回，会出现<b>面包屑显示 <code>/</code> 而列表是 <code>/var/log</code> 的内容</b>。此时新建/重命名按 <code>_currentPath</code> 生成路径，会写到另一个目录。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">加请求序号，或提交结果前比对目标路径是否仍是当前路径。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-2" aria-label="标记 state-2 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">目录加载失败被吞掉，后续文件操作会打错目录</h3>
+        <div class="f-refs"><code>sftp_page.dart:752</code><code>sftp_page.dart:154</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>错误 UI 的显示条件是 <code>_errorMessage != null &amp;&amp; _files.isEmpty</code>；而 <code>_currentPath</code> 在尝试列目录<b>之前</b>就提交了。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">从有权限的目录进入无权限目录：面包屑显示新目录、列表仍是旧目录内容、且<b>不显示任何错误</b>。此时新建/重命名会写到那个其实没打开成功的目录，点文件行打开的是旧目录的文件。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">失败时回滚 <code>_currentPath</code>，或把「已加载路径」与「目标路径」拆成两个状态。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-3" aria-label="标记 state-3 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">多选状态跨目录不清理，批量删除会删掉屏幕外的文件</h3>
+        <div class="f-refs"><code>sftp_page.dart:54</code><code>sftp_page.dart:173</code><code>sftp_page.dart:262</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_navigateToCrumb</code> / <code>_navigateTo</code> 不碰 <code>_selectedPaths</code>；多选模式下点行是切换选中，但面包屑仍然可点。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">在 <code>/home/user</code> 长按 <code>id_rsa</code> 进入多选 → 点根面包屑 → 点「批量删除」（底部仍显示「已选 1 个」）→ 删掉 <code>/home/user/id_rsa</code>，而界面显示的是 <code>/</code>。确认框里列了文件名，这是唯一阻止误删的防线。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">导航时清空选中集合（或至少剔除不在新目录下的条目）。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-4">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-4" aria-label="标记 state-4 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-4</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">编辑主机时凭据被删，会写入悬空的 credential_id</h3>
+        <div class="f-refs"><code>add_host_page.dart:372</code><code>add_host_page.dart:393</code><code>add_host_page.dart:174</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>凭据列表为空时 <code>:372</code> 提前 return，导致 <code>:393</code> 的 <code>_selectedCredentialId = null</code> 清理<b>执行不到</b>；<code>validate()</code> 里也没有该下拉框的校验器（<code>:174</code> 只判是否为 null）。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">编辑一台主机 → 点「管理凭据」→ 删掉那唯一的凭据 → 返回 → 页面显示「请先添加凭据」且没有下拉框 → 点保存 → <b>成功插入一行指向已删除凭据的主机</b>并提示「主机已更新」，但这台主机永远连不上。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">把清理逻辑移到提前 return 之前；同时给下拉框加校验器。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-5">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-5" aria-label="标记 state-5 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-5</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">容器日志对话框会把整个页面 pop 掉</h3>
+        <div class="f-refs"><code>container_shell_page.dart:452</code><code>container_shell_page.dart:487</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>barrierDismissible: false</code> 挡不住返回键或手势；返回键会 pop 掉顶层的 loading 对话框，之后 <code>:487</code> 用<b>页面 context</b> 调的 <code>Navigator.pop(context)</code> 就 pop 掉了 <code>ContainerShellPage</code> 本身。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">在 <code>docker logs</code> 较慢的主机上点 Logs，趁 spinner 出现按返回 → 回到容器列表 → 日志到达时容器页自己关闭，用户被无故弹回主机控制台。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">持有对话框 route 的引用并只 pop 它，或 pop 前判断它是否还在栈顶。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-6">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-6" aria-label="标记 state-6 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-6</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">无线 ADB 连接在开关关闭后仍然写入「已连接」</h3>
+        <div class="f-refs"><code>wireless_adb_page.dart:88</code><code>wireless_adb_page.dart:50</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>连接路径 <code>await Future.delayed(2 秒)</code> 后无条件写入 <code>_adbStatusKey = 'adb_connected_to'</code> 并插入设备；<code>_toggleWirelessDebugging(false)</code> 只改状态，不使在途任务失效。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">开启无线调试 → 填 IP → 点连接 → 2 秒内关掉开关 → 状态卡翻回「ADB 已连接到 192.168.x.x:5555」并显示绿色链接图标，而开关是关的、两个输入框和连接按钮都已禁用。<b>界面状态自相矛盾。</b>（该页本身是 mock，无实际破坏。）</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">加递增的请求序号，写入前比对；或让关闭开关使在途任务失效。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-7">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-7" aria-label="标记 state-7 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-7</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">sftp_page 全程没有 mounted 检查，每次退出都报 setState after dispose</h3>
+        <div class="f-refs"><code>sftp_page.dart:72</code><code>sftp_page.dart:99</code><code>sftp_page.dart:169</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_resolveAndConnect</code> / <code>_connect</code> / <code>_loadFilesForPath</code> 里每个 <code>setState</code> 都没有 <code>mounted</code> 守卫，包括 <code>:169</code> 的 <code>finally { setState(() =&gt; _isLoadingDir = false); }</code>；而这些方法都是 fire-and-forget 调用。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">点目录、或在慢主机上打开页面后立刻返回，每次退出都触发 <code>setState() called after dispose</code> 异常；release 下变成对已失效 <code>_element</code> 的空断言错误。状态更新丢失（<code>_isLoadingDir</code> 会停在 true）。终端页做对了（<code>ssh_terminal_page.dart:127</code> 有守卫），所以这是遗漏而非有意。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">每个 <code>await</code> 之后补 <code>if (!mounted) return;</code>。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="leak-5">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="leak-5" aria-label="标记 leak-5 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">leak-5</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">连接中刷新会重入监控初始化，泄漏一个永不取消的轮询 Timer</h3>
+        <div class="f-refs"><code>host_console_page.dart:596</code><code>host_console_page.dart:62</code><code>host_console_page.dart:96</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_retryMonitoring</code> 先把 <code>_connecting</code> 置回 false 再调 <code>_initMonitoring</code>，绕过了 <code>:62</code> 的重入检查，而第一次运行还停在 <code>await connect()</code> 上；两条路径都可能在 <code>:96</code> 建 <code>Timer.periodic</code>，而只有最后一个被存进 <code>_pollTimer</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">另一个 Timer 每 3 秒触发一次且 <code>dispose()</code> 永不取消，持续持有已销毁的 State；页面每 tick 轮询两次、图表数据每 tick 前移两次。另一种交错下还会误闪「模拟数据 / 无法连接」遮罩和错误提示，而连接其实马上就成功了。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">不要在重入点之前清标志；用一个 owned future 统一管理监控生命周期。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="leak-4">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="leak-4" aria-label="标记 leak-4 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">leak-4</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">SshConnection 的 stderr 订阅从不取消</h3>
+        <div class="f-refs"><code>ssh_service.dart:190</code><code>ssh_service.dart:219</code><code>ssh_service.dart:235</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_session!.stderr.listen(...)</code> 的返回值被直接丢弃；<code>disconnect()</code> 与 <code>dispose()</code> 只取消了 <code>_outputSub</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">每次重连泄漏一个订阅及其闭包。虽被 <code>_disposed</code> / <code>isClosed</code> 守卫住不会崩，但订阅随连接次数累积。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">存下 stderr 的 <code>StreamSubscription</code>，在 disconnect / dispose 里一并取消。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="fail-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-3" aria-label="标记 fail-3 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">parseSystemctl 把 SUB 列折进 DESCRIPTION，所有运行中的服务都受影响</h3>
+        <div class="f-refs"><code>monitoring_service.dart:210</code><code>systemd_page.dart:689</code><code>systemd_page.dart:707</code><code>systemd_page.dart:110</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>按 <code>\s{2,}</code> 切分，但 systemd 会把 SUB 列补齐，<code>running</code> 后面只留<b>一个</b>空格，于是只切出 4 段。实测 138 行里 28 行（全部 <code>running</code> 服务）受影响。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">运行中的服务（用户最关心的那些）没有描述行；sub 徽章把整段描述塞进 128px 胶囊；<code>_stateColor</code> 落进灰色的 default 分支而不是绿色 running；<b>按描述搜索永远搜不到运行中的服务</b>。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">按固定列宽切片（systemd 输出是定宽的），或用正则只匹配 active / sub 的取值枚举。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="leak-6">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="leak-6" aria-label="标记 leak-6 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">leak-6</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">testConnection 失败路径既不断开也不释放连接</h3>
+        <div class="f-refs"><code>ssh_provider.dart:27</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>成功路径调了 <code>disconnect()</code>，<b>失败路径两者都没调</b>；<code>SshConnection</code> 的 client 与两个 <code>StreamController</code> 保持未关闭。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">每次从添加主机页点「测试连接」而失败，都留下一个未关闭的连接对象，直到 GC 回收。轻微但真实，且失败恰恰是这条路径最常见的结局。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">用 <code>finally</code> 统一调用 <code>dispose()</code>。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+    <article class="f" data-sev="P1" data-id="fail-13">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="fail-13" aria-label="标记 fail-13 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">fail-13</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">没有 docker 权限时，容器页显示「还没有容器」而不是报错</h3>
+        <div class="f-refs"><code>container_shell_page.dart:135</code><code>container_shell_page.dart:123</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>只有输出里含 <code>not found</code> / <code>command not found</code> / <code>docker: command</code> 时才设置 <code>_error</code>。其余错误（守护进程未启动、或 SSH 用户不在 <code>docker</code> 组——远端会打印 <code>permission denied while trying to connect to the Docker daemon socket…</code>）直接落到 <code>_parseDockerOutput</code>，解析出 0 行，然后 <code>_error = null</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">页面渲染成空状态「还没有容器」。<b>用户会以为服务器上真的没有容器</b>，而真实原因是权限不足或守护进程挂了——两者都需要完全不同的处置，且都不会有任何提示。把用户加到 <code>docker</code> 组是极常见的部署遗漏，所以这条很容易撞上。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">解析出 0 行且输出非空时不要清空 <code>_error</code></span>：把远端输出原样展示（或提取 <code>permission denied</code> / <code>Cannot connect to the Docker daemon</code> 单独识别），并区分「确实没有容器」与「命令失败了」。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P1" data-id="state-8">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="state-8" aria-label="标记 state-8 已修复"><span></span></label>
+        <span class="sev sev-p1">P1</span><span class="f-id">state-8</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">终端里的代码片段面板可能一直转圈，永不显示内容</h3>
+        <div class="f-refs"><code>ssh_terminal_page.dart:497</code><code>ssh_terminal_page.dart:504</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_showSnippets()</code> 在<b>事件回调里</b>调 <code>final snippetsAsync = ref.watch(snippetListProvider)</code>，把这个 <code>AsyncValue</code> 快照交给 <code>showModalBottomSheet</code> 的 builder 使用。builder 是普通函数而不是 <code>Consumer</code>，所以 provider 之后解析完成时<b>不会重建这个底部面板</b>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">冷启动路径是：启动 → 首页（不读片段）→ 进主机 → 终端 → 第一次点快捷栏的 <code>{}</code>。这一刻 provider 还没被读过，返回的是 <code>AsyncLoading</code>，于是面板<b>永远停在转圈上</b>，直到用户关掉再打开一次（那时才拿到 data）。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">把面板内容包成一个 <code>Consumer</code>（或在 <code>build</code> 里 watch 而不是在回调里）</span>，让它在 provider 解析后重建。</dd></div>
+        </dl>
+      </div>
+    </article>
+  </section>
+
+  <!-- ══════════════════ P2 ══════════════════ -->
+  <section class="tier" data-tier="P2">
+    <div class="tier-head">
+      <h2>P2 · 健壮性与可用性</h2>
+      <span class="note">静默失败、无上限的资源使用、以及会让用户误判状态的细节。</span>
+      <span class="tally" style="color:var(--p2);background:var(--p2-bg)">11 条</span>
+    </div>
+
+    <article class="f" data-sev="P2" data-id="rob-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-1" aria-label="标记 rob-1 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">打开非 UTF-8 文本文件时完全无反应</h3>
+        <div class="f-refs"><code>sftp_page.dart:190</code><code>sftp_page.dart:211</code><code>sftp_page.dart:17</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>utf8.decode(bytes)</code> 对 GBK / Latin-1 字节抛 <code>FormatException: Missing extension byte</code>，而 catch 只覆盖 <code>SftpException</code>，也没有兜底 catch。已用 dart 验证。而 <code>_textExtensions</code> 里包含 <code>log</code> / <code>conf</code> / <code>ini</code> / <code>sh</code>，正是最容易非 UTF-8 的类型。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">点开中文服务器上的 GBK 日志，<b>什么都不发生</b>——没有预览页、没有提示、没有 spinner，只有一个未捕获的异步错误。调用处 <code>onTap = () =&gt; _openFile(file)</code> 丢弃了 future，用户得不到任何反馈。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix"><code>utf8.decode(bytes, allowMalformed: true)</code></span>，并补 <code>catch FormatException</code>。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-2" aria-label="标记 rob-2 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">3 秒轮询没有在途保护，executeCommand 也没有超时</h3>
+        <div class="f-refs"><code>host_console_page.dart:96</code><code>host_console_page.dart:139</code><code>ssh_service.dart:75</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>每个 tick 顺序发两条 SSH exec（<code>cat /proc/stat</code>、<code>free -m</code>），没有 <code>_polling</code> 标志，<code>executeCommand</code> 也没有超时或取消机制。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">高延迟链路上一个 tick 超过 3 秒，下一个 tick 就叠上来；重叠采样按完成顺序写入 <code>_lastCpuTimes</code>，<code>cpuUsageBetween</code> 偶尔算出陈旧或零增量（CPU 图出现 0% 凹陷）。服务器卡死时每 3 秒新增两个永不完成的 exec 通道，堆积到 <code>MaxSessions</code>，而 <code>catch (_) {}</code> 把所有错误吞掉，界面静默冻结。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">加在途标志，并给 <code>executeCommand</code> 加超时。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-3" aria-label="标记 rob-3 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">首页探测串行执行，且每台主机都要分配一个登录 shell</h3>
+        <div class="f-refs"><code>home_page.dart:51</code><code>home_page.dart:63</code><code>ssh_service.dart:168</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_probeHosts</code> 在 <code>for</code> 循环里逐个 <code>await conn.connect()</code>，每台 4 秒超时；而 <code>connect()</code> 走的是 <code>exec $SHELL -l</code> + PTY，也就是完整的登录 shell，而不只是探测可达性。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">10 台不可达主机要等 40 秒才更新完最后一台的状态，期间列表状态逐步跳变；每次探测都在每台服务器上拉起一个登录 shell 并产生一条登录日志。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">并发探测（带并发上限），并只做 TCP / 握手级探测。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-4">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-4" aria-label="标记 rob-4 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-4</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">图表 X 轴标注与实际时间窗口差 3 倍</h3>
+        <div class="f-refs"><code>host_console_page.dart:96</code><code>host_console_page.dart:55</code><code>resource_chart.dart:64</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>每 3 秒采样、缓冲 20 点 = <b>60 秒</b>窗口，但 <code>resource_chart.dart:64</code> 硬编码 x=0 显示 <code>'20s'</code>、x=19 显示 <code>'0s'</code>（按 1 秒间隔写的）。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">用户读到的时间跨度是实际的 1/3，会据此误判资源变化的快慢。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">按「点数 × 采样间隔」计算标签文字。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-5">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-5" aria-label="标记 rob-5 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-5</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">文件预览无大小上限，编辑器每次按键都全文扫描</h3>
+        <div class="f-refs"><code>sftp_page.dart:186</code><code>file_preview_page.dart:183</code><code>file_preview_page.dart:274</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>readFile</code> 累积全部 chunk 后还要再分配一个同等大小的缓冲；随后整份内容交给 <code>SelectableText</code>，没有任何大小守卫。编辑器 <code>onChanged: (_) =&gt; setState(() {})</code> 会让每次按键都对全文跑 <code>'\n'.allMatches(...)</code> 与 <code>.characters.length</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">点开几百 MB 的日志（<code>/var/log</code> 下很常见）会严重卡顿甚至被 OOM 杀死；编辑器里每次按键的延迟与<b>文件总大小</b>成正比，与屏幕上看得到的内容无关。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">加大小上限并给出提示；编辑器改用增量维护行数。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-7">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-7" aria-label="标记 rob-7 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-7</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">「清空数据」触发 O(N) 次连锁 provider 重建</h3>
+        <div class="f-refs"><code>settings_page.dart:351</code><code>providers.dart:67</code><code>providers.dart:125</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>循环里逐个 <code>deleteItem</code>，每次内部都 <code>ref.invalidateSelf()</code>；而 <code>HostListNotifier.build()</code> 又 watch 了 <code>credentialListProvider</code>，于是每次失效都连锁重建一次并重查数据库。另外 <code>:358</code> 的 <code>SecureStorage.deleteCredential</code> 是重复调用（<code>deleteItem</code> 里已经删过）。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">数据多时「清空数据」明显变慢，并在一个正在失效的 provider 上反复读取。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">提供批量删除方法，一次事务 + 一次失效。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-9">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-9" aria-label="标记 rob-9 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-9</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">恢复备份非事务、不校验 schema、也不恢复设置</h3>
+        <div class="f-refs"><code>settings_page.dart:261</code><code>settings_page.dart:285</code><code>settings_page.dart:300</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>逐行 insert 到三张表，没有 <code>db.transaction</code>，行内容也不校验；任一行列名不匹配就抛出，catch 只弹提示、<b>不回滚</b>。另外它不恢复 <code>tb_settings</code>。恢复是按 id 合并（<code>ConflictAlgorithm.replace</code>），所以旧备份会静默覆盖同 id 的较新行，而结果一律报成功。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">中途失败会留下<b>半恢复</b>的数据库；「完整备份」实际不含设置；用户无法从提示判断到底恢复了什么。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">整段包进 <code>db.transaction</code>，逐行做 schema 校验，补上 settings，并在结果里报告实际写入的行数。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-6">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-6" aria-label="标记 rob-6 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-6</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">uname -a 解析在短输出时抛 RangeError，主机信息静默留空</h3>
+        <div class="f-refs"><code>host_console_page.dart:128</code><code>host_console_page.dart:136</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>uname.split(' ').sublist(0, 3)</code> 在元素少于 3 个时抛 <code>RangeError: Invalid value: Not in inclusive range 0..1: 3</code>。连接在 <code>connect()</code> 成功之后、<code>uname</code> exec 之前掉线时，exec 返回的正是错误串。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">主机信息头部留空、标题回落到显示 IP 而不是主机名，且被 <code>catch (_) {}</code> 吞掉，没有任何提示。影响是外观层面的，但失败是静默的。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">解析前先判长度。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-8">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-8" aria-label="标记 rob-8 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-8</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">保存路径的 future 没有 await，「已保存」可能早于真正落库</h3>
+        <div class="f-refs"><code>add_host_page.dart:199</code><code>add_credential_page.dart:143</code><code>snippet_list_page.dart:202</code><code>credential_list_page.dart:132</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>这些保存调用都没有 <code>await</code>，于是成功提示可能先于写盘完成，写盘失败只表现为未捕获的异步错误。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">存储异常时用户看到成功提示，但数据没有保存——而且此后不会收到任何纠正信息。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix"><code>await</code> 之后再提示，失败走错误分支。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="rob-10">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-10" aria-label="标记 rob-10 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-10</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">「有未保存修改」的标记用了动词文案</h3>
+        <div class="f-refs"><code>file_preview_page.dart:213</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>标记脏数据状态的徽章文案是 <code>t('edit')</code>（「编辑」/ Edit），而 <code>strings</code> 里根本没有 unsaved / modified 这个 key。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">编辑文件时看到的徽章像是模式标签而不是「有未保存修改」的指示，用户可能在未保存的情况下退出。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">新增 <code>unsaved</code> 文案 key（8 种语言）。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+    <article class="f" data-sev="P2" data-id="rob-11">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="rob-11" aria-label="标记 rob-11 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">rob-11</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">批量删除全部失败后，仍然提示「已删除」</h3>
+        <div class="f-refs"><code>sftp_page.dart:286</code><code>sftp_page.dart:279</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>循环里逐个 <code>deleteFile</code>，每个失败都单独弹一条错误提示；但循环结束后<b>无条件</b>执行 <code>_showSnack(t('file_deleted'))</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">即使每一个文件都删除失败（无权限、目录非空、文件被占用），最后停留的消息也是「已删除」。用户看到一串错误之后跟着一句成功，<b>不知道到底删掉了几个</b>，只能凭猜。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">统计成功与失败数量，按结果给出对应提示（全部成功 / 部分成功 / 全部失败），或直接复用最后一次错误。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+  </section>
+
+  <!-- ══════════════════ P3 ══════════════════ -->
+  <section class="tier" data-tier="P3">
+    <div class="tier-head">
+      <h2>P3 · i18n 一致性与工程卫生</h2>
+      <span class="note">不会立刻让功能失效，但会持续侵蚀可维护性与协作。</span>
+      <span class="tally" style="color:var(--p3);background:var(--p3-bg)">13 条</span>
+    </div>
+
+    <article class="f" data-sev="P3" data-id="i18n-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="i18n-1" aria-label="标记 i18n-1 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">i18n-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">38 处硬编码中文绕过 8 语言层</h3>
+        <div class="f-refs"><code>file_item.dart:54</code><code>sftp_service.dart:95</code><code>ssh_service.dart:253</code><code>app_theme.dart:210</code><code>secure_storage.dart:20</code><code>ssh_provider.dart:34</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>逐文件统计：<code>file_item</code> 9 处（文件类型标签）、<code>sftp_service</code> 12 处（错误文案）、<code>ssh_service</code> 6 处（错误文案）、<code>app_theme</code> 6 处（主题名）、<code>secure_storage</code> 3 处、<code>ssh_provider</code> 1 处。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">选了英 / 日 / 韩 / 法 / 德 / 俄 / 西中的任一种，仍会在文件列表、连接失败提示、主题名里看到中文。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">收进 <code>strings.dart</code> 走 <code>t()</code>。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="i18n-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="i18n-2" aria-label="标记 i18n-2 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">i18n-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">nameEn 是死字段，主题名永远显示中文</h3>
+        <div class="f-refs"><code>app_theme.dart:10</code><code>settings_page.dart:526</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>AppThemeDef</code> 同时定义了 <code>nameZh</code> 与 <code>nameEn</code>，但全项目只有 <code>settings_page.dart:526</code> 用了 <code>preset.nameZh</code>，<code>nameEn</code> 零引用。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">8 语言界面下主题名恒为中文（「Neko 暗黑」「护眼绿」…），尽管英文名就写在同一行代码里。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">按当前语言选择，或把主题名也收进 <code>strings</code>。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="i18n-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="i18n-3" aria-label="标记 i18n-3 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">i18n-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">连接错误文案是中文，i18n 表里已有对应 key 却没接上</h3>
+        <div class="f-refs"><code>ssh_service.dart:250</code><code>add_host_page.dart:150</code><code>strings.dart</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_translateError</code> 返回硬编码中文；而 <code>strings</code> 里 <code>conn_timeout</code> / <code>auth_failed</code> / <code>conn_refused</code> / <code>host_unreachable</code> / <code>ssh_not_connected</code> 这些 key <b>都已存在且无人使用</b>。这是纯粹的漏接线，不是缺翻译。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">英文界面下添加主机、测试连接失败时，用户看到「❌ 连接被拒绝，请检查端口与服务状态」，无法在所选语言下读懂诊断。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">让 <code>_translateError</code> 返回 key 或错误码，由 UI 层 <code>t()</code> 翻译。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="i18n-5">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="i18n-5" aria-label="标记 i18n-5 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">i18n-5</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">本地终端的输出是硬编码英文，中英混排</h3>
+        <div class="f-refs"><code>local_shell_page.dart:61</code><code>local_shell_page.dart:134</code><code>local_shell_page.dart:203</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>'Device: Android'</code>、<code>'Architecture: aarch64'</code>、整段 <code>help</code> 列表、<code>'$cmd: command not found'</code> 都是英文，而页面外壳（<code>t('local_shell')</code>、<code>t('input_command_hint')</code>）是本地化的。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">默认中文界面下中英混排。（该页本身是 mock，见 fail-11——修那个之前不必单独修这个。）</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">随 fail-11 一起处理。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="i18n-4">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="i18n-4" aria-label="标记 i18n-4 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">i18n-4</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">中日韩标点泄漏到其它语言的界面</h3>
+        <div class="f-refs"><code>sftp_page.dart:263</code><code>sftp_page.dart:109</code><code>sftp_page.dart:167</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>批量删除确认用 <code>_selectedPaths.map(...).join('、')</code>；错误串拼成 <code>'${t('connection_failed')}：$e'</code>（全角冒号）。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">英文界面下出现 <span class="m">Delete the following 3 files? a、b、c</span> 这样的中日韩标点。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">用本地化的列表分隔符与半角冒号。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-1" aria-label="标记 eng-1 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">零测试、零 CI，而四个解析器是最容易出错也最该测的地方</h3>
+        <div class="f-refs"><code>pubspec.yaml:27</code><code>无 test/ 目录</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>flutter_test</code> 列在 dev_dependencies，但项目<b>没有 <code>test/</code> 目录</b>，也没有任何 CI 配置。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">本页 54 条缺陷全靠人工发现；<code>MonitoringService</code> 那四个纯函数解析器（<code>parseTop</code> / <code>parseFree</code> / <code>parsePs</code> / <code>parseSystemctl</code>）零覆盖——而 fail-1、fail-2、fail-3 三条全部出在这里。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">先给这四个纯函数补单测（喂真实命令输出做断言），再加 CI 跑 <code>flutter analyze</code> + <code>flutter test</code>。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-2" aria-label="标记 eng-2 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">项目本身没有纳入版本控制，而签名密钥就在树里</h3>
+        <div class="f-refs"><code>.idea/vcs.xml:4</code><code>android/nekomux-release.jks</code><code>android/key.properties</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>vcs.xml</code> 只把 <code>termux-app</code> 映射为 Git 仓库——NekoMux 自己没有 <code>.git</code>。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">没有历史，无法 bisect 或回滚（本页任何一条修复都无处可退）。更危险的是 <code>nekomux-release.jks</code> 与 <code>key.properties</code> 就在工程树里——一旦 <code>git init &amp;&amp; add -A</code> 而 <code>.gitignore</code> 未按预期生效，<b>签名密钥会被提交</b>，而 README 自己也说「丢失密钥意味着以后的 APK 无法覆盖安装」。（当前两个文件权限都是 600，<code>.gitignore</code> 也覆盖了它们，这是好的。）</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix"><code>git init</code> 后<b>先</b>用 <code>git status --ignored</code> 确认 <code>key.properties</code> / <code>*.jks</code> 确实被忽略，再做首次提交。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-3">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-3" aria-label="标记 eng-3 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-3</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">termux-app 是 9.7MB 的完整克隆，且未被任何构建引用</h3>
+        <div class="f-refs"><code>android/settings.gradle.kts:33</code><code>termux-app/.git</code><code>termux-app/app/testkey_untrusted.jks</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>它是完整的 Termux 仓库克隆，含自己的 <code>.git</code>、<code>.github/workflows</code> 和 <code>app/testkey_untrusted.jks</code>；而 <code>android/settings.gradle.kts</code> 只有 <code>include(":app")</code>，全项目没有任何引用。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">9.7MB 的仓库体积与噪音；嵌套的 git 仓库会让外层 git 把它当成 gitlink 或在 <code>git add -A</code> 时报出令人困惑的警告。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">删除，或改成 submodule；如果只是为了 terminal-view / terminal-emulator，改成 Maven 坐标依赖即可。</span>（若打算用 fail-11 接真实本地终端，就先留着并明确它的角色。）</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-4">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-4" aria-label="标记 eng-4 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-4</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">两套状态管理框架并存，其中一套完全没用</h3>
+        <div class="f-refs"><code>pubspec.yaml:13</code><code>pubspec.yaml:15</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>provider: ^6.1.1</code> 零 import，而 <code>flutter_riverpod</code> 被 21 个文件使用；<code>cupertino_icons</code> 也没有任何 <code>CupertinoIcons</code> 引用。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">两套状态管理框架并列会让人不确定新代码该用哪个；无用依赖增加构建面与审计面。（<code>path</code> / <code>uuid</code> / <code>fl_chart</code> / <code>xterm</code> / <code>google_fonts</code> 都在用，只有这两个是死的。）</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">从 pubspec 移除这两个依赖。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-5">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-5" aria-label="标记 eng-5 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-5</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">字体在运行时从 Google Fonts 拉取，离线时静默回退</h3>
+        <div class="f-refs"><code>app_theme.dart:94</code><code>app_theme.dart:150</code><code>ssh_terminal_page.dart:258</code><code>pubspec.yaml</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>没有配置 <code>allowRuntimeFetching</code>，pubspec 里也没有 <code>fonts:</code> / <code>assets:</code> 段，所以 Inter 与 JetBrains Mono 都要在冷启动时从 <code>fonts.gstatic.com</code> 拉取（<code>container_shell_page.dart:265</code> 还用了第三种）。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">没有网络、或该域名不可达时（考虑到本项目用的是 pub.flutter-io.cn 镜像与代理，这是很可能的情况），字体静默回退到系统默认；首屏会有字体替换闪动，启动也多一次网络往返。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">把用到的字体子集打进 <code>assets/</code> 并在 pubspec 里声明，运行时不再依赖网络。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-7">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-7" aria-label="标记 eng-7 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-7</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">删除凭据不检查引用，且声明的外键形同虚设</h3>
+        <div class="f-refs"><code>credential_list_page.dart:132</code><code>providers.dart:72</code><code>app_database.dart:52</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>deleteItem</code> 只删自己，无级联也无警告；数据库没有 <code>onConfigure</code> / <code>PRAGMA foreign_keys=ON</code>，所以 <code>app_database.dart:52</code> 声明的 <code>FOREIGN KEY</code> 不被 SQLite 强制执行；确认框只问「确认删除凭据 {0}」，不提有多少主机依赖它。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">删掉一个凭据会让多台主机静默变成孤儿——它们连不上，而界面只给一句「凭据不存在」，用户不会把这两件事联系起来。（直接崩掉的是 <code>firstWhere</code> 那种写法；这里全用 <code>firstOrNull</code> 兜住了，所以是静默而非崩溃。）</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">在 <code>onConfigure</code> 里开外键并选用 ON DELETE 策略；删除凭据前提示「将有 N 台主机受影响」。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-6">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-6" aria-label="标记 eng-6 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-6</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">启动器名称是 neko_mux</h3>
+        <div class="f-refs"><code>AndroidManifest.xml:5</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>android:label="neko_mux"</code>，而应用内、README、关于页都写作 NekoMux。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">桌面图标与最近任务列表里显示的是下划线命名形式，是用户看到产品名的第一处。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">改成 <code>NekoMux</code>（或移到 <code>strings.xml</code> 做本地化）。</span></dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P3" data-id="eng-8">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-8" aria-label="标记 eng-8 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-8</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">对话框的 TextEditingController 没有 dispose</h3>
+        <div class="f-refs"><code>settings_page.dart:213</code><code>snippet_list_page.dart:111</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd><code>_showRestoreDialog</code> 的 <code>ctrl</code>、以及 snippet 弹窗的 <code>titleController</code> / <code>commandController</code> 都是每次调用新建且从不 dispose。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">每次开关对话框留下一个只靠 GC 回收的 controller，会话内累积；在开启 leak tracker 的测试里会被报出来。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd><span class="fix">弹窗关闭后 dispose。</span>（注意 <code>snippet_injection_dialog.dart:46</code> 那种「<code>await showDialog</code> 之后 dispose」的写法是<b>正确的</b>，不用改。）</dd></div>
+        </dl>
+      </div>
+    </article>
+  </section>
+
+  <!-- ══════════════════ 功能缺口 ══════════════════ -->
+  <section class="panel">
+    <h2>功能缺口</h2>
+    <p class="note">对照仓库里 <code>dev.md</code> 自己的 MVP 规划（那份文档写得很具体），以下是被规划但尚未实现的部分。</p>
+    <ul>
+      <li><b>SFTP 上传与下载</b> —— MVP 2.0 明确列了这一项，但 <code>sftp_service.dart</code> 只有 list / read / write / delete / rename / mkdir 七个方法，没有上传下载、没有进度、没有可取消的传输队列。</li>
+      <li><b>后台传输任务中心</b> —— PRD 里描述的「带进度圆环、可查看速率与剩余时间、不影响前台操作」的任务中心不存在。<code>task_manager_page.dart</code> 实际是远端 <code>ps aux</code> 进程管理，与传输无关，命名容易让人误会。</li>
+      <li><b>known_hosts 持久化</b> —— 这是最该补的一项。<code>host_key_verifier.dart:5</code> 只是个内存 <code>Set</code>，重启即忘。这意味着「主机密钥变了」这个<b>最关键的告警在架构上无法存在</b>，而那正是中间人的唯一信号。修 sec-1 时必须一起做，否则只是把弹窗补上了、检测能力仍然为零。</li>
+      <li><b>SFTP 多选批量操作</b> —— PRD 明确要求（长按进多选、底部升起操作栏、批量下载与批量删除）。当前有多选与批量删除，但没有批量下载，且选中状态跨目录不清理（见 state-3）。</li>
+      <li><b>断线重连浮层 + buffer 保留</b> —— PRD 明确要求（切回 App 时若管道已断，叠加半透明遮罩 + 「一键重连」，重连后终端历史必须保留）。终端页有重连入口，但缺少这条体验的完整实现与守卫（见 leak-2）。</li>
+      <li><b>VNC 远程桌面</b> —— PRD 第五节的整节内容，目前只是 <code>host_console_page.dart:754</code> 一个 <code>enabled: false</code> 加「即将推出」徽章的占位。<b>这一处是诚实的占位，不算 bug</b>；要决定的是排期还是从 PRD 里降级。</li>
+      <li><b>主机分组、标签与搜索</b> —— 主机一多，首页只有「在线 / 离线」两段平铺列表，没有分组、没有搜索框。</li>
+      <li><b>SSH 端口转发 / 隧道</b> —— 常见运维需求，完全缺失。</li>
+      <li><b>公钥生成与部署</b> —— 没有本地生成密钥对、也没有 <code>ssh-copy-id</code> 那类一键部署，用户必须手工处理私钥文本。</li>
+    </ul>
+  </section>
+
+  <!-- ══════════════════ 误报排除 ══════════════════ -->
+  <section class="panel">
+    <h2>已核实、<em>不是</em> bug</h2>
+    <p class="note">这些是审计过程中看着可疑、但逐条验证后确认没问题的。列出来是为了避免你花时间去「修」它们。</p>
+    <ul>
+      <li><code>app.dart:20</code> 的 <code>firstWhere</code> 带 <code>orElse</code>，不会抛 StateError。全项目也没有任何不带 <code>orElse</code> 的 <code>firstWhere</code>。</li>
+      <li><b>悬空的 <code>credential_id</code> 不会崩溃。</b>8 处凭据查找全部用 <code>.where(...).firstOrNull</code> 加本地化的「凭据不存在」提示，<code>HostCard</code> 也对 <code>credentialUsername</code> 做了空值判断。真正的后果是 state-4 和 eng-7，不是崩溃。</li>
+      <li><code>file_preview_page.dart:71</code> 的 <code>await Future.sync(() =&gt; widget.onSave!(...))</code> 看着像「async 回调挂在 void 签名上没被等待」的经典陷阱。<b>实测确实会等</b>（约 300ms），内层 future 被正确串起来了。</li>
+      <li><code>systemd_page.dart:116</code> 的 <code>switch</code> 没有 <code>break</code> 不是 bug —— Dart 3 有隐式 break，已用最小用例实测。</li>
+      <li><b>恢复备份不会清空已有数据</b>（它只 insert，从不 DELETE）。数据丢失的方向是 data-1，不是覆写。</li>
+      <li><code>snippet_injection_dialog.dart:46</code> 在 <code>await showDialog</code> 之后 dispose controller / focus node 的写法是<b>正确的</b>，不需要改成别的模式。</li>
+      <li><code>TerminalController</code> 没有显式 dispose 不会真泄漏（<code>notifyListeners</code> 只由指针/选区输入驱动，它与监听闭包一起变得不可达）。</li>
+      <li>dartssh2 传给回调的确实是 MD5 摘要（<code>MD5Digest().process(hostkey)</code>），所以 <code>formatMd5</code> 的标注<b>正确</b>，不是标错算法。</li>
+      <li><code>resource_chart.dart</code> 里 <code>spot.x == 19</code> 判断的分支会正常触发 —— fl_chart 的 tick 迭代在收尾时会 <code>yield max</code>，所以「0s」标签是渲染出来的。（我一开始怀疑这条，读了 fl_chart 源码后确认不成立。）</li>
+      <li><b>命令注入当前不可达</b>：systemd 单元名与容器名都有字符集限制，<code>kill -9 $pid</code> 的 pid 已解析为 int。不过 <code>systemctl $action $unit</code> 这类不加引号的拼接仍值得加固。</li>
+      <li><code>flutter analyze</code> 全绿（0 issues）；<code>dist/SHA256SUMS.txt</code> 三个 APK 校验通过；minSdk 24 / targetSdk 36 与 Flutter 3.44 的默认值一致；<code>key.properties</code> 与 <code>.jks</code> 权限均为 600；README 里的版本与包名描述属实。</li>
+    </ul>
+  </section>
+
+  <!-- ══════════════════ 修复顺序 ══════════════════ -->
+  <section class="panel">
+    <h2>建议的修复顺序</h2>
+    <p class="note">按「影响 ÷ 改动量」排序。前三条都是一行到几行的改动，但挡住了最严重的后果。</p>
+    <ol class="order">
+      <li><b>data-1</b> 备份恢复的键名 —— 一个词的改动，挽回永久性数据丢失，而且是用户会真正踩到的路径。</li>
+      <li><b>fail-1 + fail-2</b> <code>free</code> 的 locale 与 systemd 的 <code>●</code> —— 各一行，直接决定「内存监控」与「服务管理」两个主功能是否可用。</li>
+      <li><b>fail-7</b> 首页探测的无限循环 —— 加一个时间戳节流 + <code>setOnline</code> 去重，止住后台持续重连与 fail2ban 风险。</li>
+      <li><b>sec-1 + known_hosts 持久化</b> —— 补上回调只是第一步；把接受过的主机密钥落盘，才能真正检测「密钥变了」。</li>
+      <li><b>leak-1 / leak-2 / leak-3</b> —— 根因都在 <code>SshConnection.connect()</code> 一处：每个 <code>await</code> 之后检查 <code>_disposed</code>。改一个类，修好六个页面。</li>
+      <li><b>sec-2 + sec-3</b> —— 导出改走 SAF 写文件；manifest 加 <code>allowBackup="false"</code> 并给凭据读取失败补降级路径。</li>
+      <li><b>data-2 + data-3</b> —— 凭据编辑表单的占位符与认证方式切换，会损毁密钥，属于必修。</li>
+      <li><b>fail-4 / fail-5 / fail-6</b> —— 让 <code>executeCommand</code> 返回退出码，一次改动同时修掉 systemd、进程管理与容器三处的「假成功」。</li>
+      <li><b>fail-8 / fail-9 / fail-10</b> —— 四个设置项接线或移除；语言在启动时生效；补三条 i18n key。</li>
+      <li><b>eng-1</b> 先给四个解析器写单测 —— 做完这一步，P1 里的三条 parser 缺陷以后不会复发。</li>
+      <li>其余 P2 / P3 按各自模块的改动窗口顺带处理。</li>
+    </ol>
+  </section>
+
+  <footer>
+    <span>审计覆盖 <code>lib/</code> 全部 40 个文件、Android 构建配置与依赖清单。</span>
+    <span><code>flutter analyze</code> · 0 issues</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORE_KEY = "nekomux-audit-fixed-v1";
+  var findings = Array.prototype.slice.call(document.querySelectorAll(".f"));
+  var total = findings.length;
+
+  /* ---------- 勾选状态（localStorage：每个查看者自己的进度） ---------- */
+  function loadFixed() {
+    try {
+      var raw = window.localStorage.getItem(STORE_KEY);
+      if (!raw) return {};
+      var parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveFixed(map) {
+    try {
+      window.localStorage.setItem(STORE_KEY, JSON.stringify(map));
+    } catch (e) {
+      /* 隐私模式或被禁用时静默降级：勾选仍然可用，只是不持久化 */
+    }
+  }
+
+  var fixed = loadFixed();
+
+  function syncProgress() {
+    var done = 0;
+    findings.forEach(function (f) {
+      if (fixed[f.getAttribute("data-id")]) done++;
+    });
+    document.getElementById("done").textContent = String(done);
+    document.getElementById("total").textContent = String(total);
+    document.getElementById("fill").style.width =
+      total ? (done / total) * 100 + "%" : "0%";
+  }
+
+  findings.forEach(function (f) {
+    var id = f.getAttribute("data-id");
+    var box = f.querySelector("input[type=checkbox]");
+    if (!box) return;
+
+    if (fixed[id]) {
+      box.checked = true;
+      f.classList.add("done");
+    }
+
+    box.addEventListener("change", function () {
+      if (box.checked) {
+        fixed[id] = 1;
+        f.classList.add("done");
+      } else {
+        delete fixed[id];
+        f.classList.remove("done");
+      }
+      saveFixed(fixed);
+      syncProgress();
+    });
+  });
+
+  document.getElementById("reset").addEventListener("click", function () {
+    fixed = {};
+    saveFixed(fixed);
+    findings.forEach(function (f) {
+      var box = f.querySelector("input[type=checkbox]");
+      if (box) box.checked = false;
+      f.classList.remove("done");
+    });
+    syncProgress();
+  });
+
+  /* ---------- 严重度统计（点击即筛选） ---------- */
+  var SEVS = ["P0", "P1", "P2", "P3"];
+  var LABEL = {
+    P0: "安全与数据丢失",
+    P1: "功能失效与泄漏",
+    P2: "健壮性与可用性",
+    P3: "i18n 与工程卫生"
+  };
+
+  var counts = { ALL: total, P0: 0, P1: 0, P2: 0, P3: 0 };
+  findings.forEach(function (f) {
+    var s = f.getAttribute("data-sev");
+    if (counts[s] !== undefined) counts[s]++;
+  });
+
+  var stats = document.getElementById("stats");
+
+  function makeStat(key, num, label) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "stat";
+    b.setAttribute("data-sev", key);
+    b.setAttribute("aria-pressed", key === "ALL" ? "true" : "false");
+    var n = document.createElement("span");
+    n.className = "n";
+    n.textContent = String(num);
+    var k = document.createElement("span");
+    k.className = "k";
+    k.textContent = label;
+    b.appendChild(n);
+    b.appendChild(k);
+    b.addEventListener("click", function () {
+      setSev(key === "ALL" ? "ALL" : key);
+    });
+    return b;
+  }
+
+  stats.appendChild(makeStat("ALL", counts.ALL, "全部条目"));
+  SEVS.forEach(function (s) {
+    stats.appendChild(makeStat(s, counts[s], s + " · " + LABEL[s]));
+  });
+
+  var activeSev = "ALL";
+  var query = "";
+
+  function apply() {
+    var shown = 0;
+    var q = query.trim().toLowerCase();
+
+    findings.forEach(function (f) {
+      var sevOk = activeSev === "ALL" || f.getAttribute("data-sev") === activeSev;
+      var textOk = !q || f.textContent.toLowerCase().indexOf(q) !== -1;
+      var visible = sevOk && textOk;
+      f.hidden = !visible;
+      if (visible) shown++;
+    });
+
+    /* 分组标题在整组被隐藏时一并隐藏 */
+    document.querySelectorAll(".tier").forEach(function (tier) {
+      var any = tier.querySelector(".f:not([hidden])") !== null;
+      tier.hidden = !any;
+    });
+
+    document.getElementById("empty").hidden = shown !== 0;
+
+    /* 同步两处筛选控件的选中态 */
+    document.querySelectorAll(".chip").forEach(function (c) {
+      c.setAttribute(
+        "aria-pressed",
+        c.getAttribute("data-sev") === activeSev ? "true" : "false"
+      );
+    });
+    document.querySelectorAll(".stat").forEach(function (s) {
+      s.setAttribute(
+        "aria-pressed",
+        s.getAttribute("data-sev") === activeSev ? "true" : "false"
+      );
+    });
+  }
+
+  function setSev(sev) {
+    activeSev = sev;
+    apply();
+  }
+
+  document.querySelectorAll(".chip").forEach(function (c) {
+    c.addEventListener("click", function () {
+      setSev(c.getAttribute("data-sev"));
+    });
+  });
+
+  var searchBox = document.getElementById("q");
+  searchBox.addEventListener("input", function () {
+    query = searchBox.value;
+    apply();
+  });
+
+  syncProgress();
+  apply();
+})();
+</script>

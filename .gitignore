@@ -1,0 +1,58 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Android release signing
+/android/key.properties
+/android/*.jks
+/android/*.keystore
+
+# Build outputs — regenerable, and 62MB of binaries would live in git history
+# forever. dist/SHA256SUMS.txt is still tracked so releases stay verifiable.
+/dist/*.apk
+
+# Vendored clone of the Termux app (9.7MB) with its own .git. Not referenced by
+# any build target. Excluded so it does not become a gitlink; see audit eng-3.
+/termux-app/
