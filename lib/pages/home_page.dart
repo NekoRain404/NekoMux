@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
+import '../providers/ssh_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
 import '../widgets/host_card.dart';
@@ -30,10 +31,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   /// 两轮自动安排的探测之间的最小间隔。未改变主机集合且落入该窗口的重建
   /// 不会发起新一轮探测。
   static const Duration _probeMinInterval = Duration(seconds: 30);
-
-  /// Connect timeout for a single reachability probe.
-  /// 单次可达性探测的连接超时。
-  static const Duration _probeConnectTimeout = Duration(seconds: 4);
 
   /// Upper bound on the number of SSH sessions one probe round may have open
   /// at the same time.
@@ -123,6 +120,18 @@ class _HomePageState extends ConsumerState<HomePage> {
       // 每轮取一次即可：所有主机的校验器读的是同一张 known_hosts 表。
       final db = await ref.read(databaseProvider.future);
 
+      // Read once per round, not per host: every probe in this sweep should be
+      // judged by the same budget even if the user changes the setting midway.
+      // The clamp itself — and the reasoning for why a background sweep must
+      // not inherit a 30s interactive timeout — lives with the provider, next
+      // to the setting it belongs to.
+      // 每轮读取一次，而不是每台主机一次：即使中途改设置，本轮所有探测也应由同一预算
+      // 判定。钳制本身（以及「后台扫描为何不能继承交互式的 30 秒超时」的理由）与它所属
+      // 的设置一起，放在 provider 旁边。
+      final probeTimeout = probeConnectTimeout(
+        ref.read(connectTimeoutProvider),
+      );
+
       final queue = <Host>[
         for (final host in hosts)
           if (!_probingHosts.contains(host.id)) host,
@@ -169,7 +178,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             final conn = SshConnection(
               host: host,
               credential: credential,
-              connectTimeout: _probeConnectTimeout,
+              connectTimeout: probeTimeout,
               onHostKeyVerify: buildHostKeyVerifier(
                 db: db,
                 address: host.ipAddress,

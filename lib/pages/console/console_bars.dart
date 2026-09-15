@@ -1,0 +1,264 @@
+import 'package:flutter/material.dart';
+
+import '../../core/i18n/strings.dart';
+import '../../models/host.dart';
+import '../../widgets/app_ui.dart';
+
+/// Pinned bar of the host console: title, live/connecting indicator, refresh.
+/// 主机控制台的固定顶栏：标题、实时/连接中指示、刷新。
+///
+/// Presentation only — it reports taps and renders state it is handed, and
+/// knows nothing about SSH or polling.
+/// 只负责展示：上报点击并渲染传入的状态，对 SSH 与轮询一无所知。
+class HostConsoleAppBar extends StatelessWidget {
+  /// Whether a monitoring connection is being established.
+  /// 是否正在建立监控连接。
+  final bool connecting;
+
+  /// Whether the monitor is currently receiving samples.
+  /// 监控当前是否在接收样本。
+  final bool live;
+
+  /// Leaves the page.
+  /// 离开本页。
+  final VoidCallback onBack;
+
+  /// Re-polls, or retries the connection when there is none.
+  /// 重新轮询；没有连接时改为重试连接。
+  final VoidCallback onRefresh;
+
+  const HostConsoleAppBar({
+    super.key,
+    required this.connecting,
+    required this.live,
+    required this.onBack,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SliverAppBar(
+      pinned: true,
+      backgroundColor: cs.surface,
+      leading: IconButton(
+        icon: Icon(
+          Icons.arrow_back,
+          color: cs.onSurface.withValues(alpha: 0.7),
+        ),
+        onPressed: onBack,
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              t('host_detail'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (connecting)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.secondary,
+              ),
+            )
+          else if (live)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 118),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: cs.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: cs.primary.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 6, color: cs.primary),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        t('real_time_interval'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: cs.primary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            const _MonitorUnavailableBadge(),
+        ],
+      ),
+      actions: [
+        IconButton(
+          tooltip: t('refresh'),
+          icon: Icon(
+            Icons.refresh,
+            color: cs.onSurface.withValues(alpha: 0.62),
+          ),
+          onPressed: onRefresh,
+        ),
+      ],
+    );
+  }
+}
+
+/// The grey badge shown when the monitor is not live and not connecting.
+/// 监控既非实时、也不在连接中时显示的灰色徽标。
+///
+/// It reads "monitor unavailable" in every language the app ships (the key is
+/// named `simulated_data`, a leftover from a time this page drew invented
+/// numbers — the app never fabricates a reading any more, and the text said so
+/// even before this badge was extracted).
+/// 在应用发布的每种语言里它都读作「监控不可用」（该键名为 `simulated_data`，
+/// 是本页曾经绘制虚构数值的时代遗留——如今应用不再编造任何读数，而文案在本次拆分
+/// 之前就已经是实话）。
+class _MonitorUnavailableBadge extends StatelessWidget {
+  const _MonitorUnavailableBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 118),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: cs.onSurface.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          t('simulated_data'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: cs.onSurface.withValues(alpha: 0.6),
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Header card: host alias, resolved host name, OS banner and status chips.
+/// 页头卡片：主机别名、解析出的主机名、系统信息与状态标签。
+class HostConsoleIdentityCard extends StatelessWidget {
+  /// The host this console belongs to.
+  /// 本控制台所属的主机。
+  final Host host;
+
+  /// Host name read from the machine, or `''` when it could not be read — in
+  /// which case the address is shown instead.
+  /// 从机器上读到的主机名；读不到时为 `''`，此时改显示地址。
+  final String hostname;
+
+  /// Distro / kernel banner, or `''`.
+  /// 发行版／内核信息；读不到时为 `''`。
+  final String osInfo;
+
+  /// Whether the monitor is live.
+  /// 监控是否实时。
+  final bool live;
+
+  const HostConsoleIdentityCard({
+    super.key,
+    required this.host,
+    required this.hostname,
+    required this.osInfo,
+    required this.live,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AppCard(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(
+              child: Text(
+                Host.getOsLogoChar(host.osType),
+                style: const TextStyle(fontSize: 28),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  host.alias,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cs.onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  hostname.isNotEmpty ? hostname : host.displayAddress,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cs.onSurface.withValues(alpha: 0.48),
+                    fontSize: 12,
+                  ),
+                ),
+                if (osInfo.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    osInfo,
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.36),
+                      fontSize: 10,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    AppBadge(
+                      label: live ? t('running') : t('offline_status'),
+                      color: live ? cs.primary : cs.error,
+                    ),
+                    AppBadge(label: 'SSH :${host.port}', color: cs.secondary),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

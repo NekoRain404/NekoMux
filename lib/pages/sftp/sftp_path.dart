@@ -62,6 +62,20 @@ String sftpBaseName(String path) {
   return slash < 0 ? path : path.substring(slash + 1);
 }
 
+/// Display names of [paths], joined into one line for a generated sentence.
+/// 将 [paths] 的显示名连接成用于生成句子的一行。
+///
+/// The separator is ', ' and never the ideographic comma '、'. The sentence the
+/// names are substituted into comes from the i18n table and is read in eight
+/// languages; only one of them writes a list with '、', so a separator chosen in
+/// code leaks that one language's punctuation into the other seven — which is
+/// exactly what English users saw: `Delete the following 3 files? a、b、c`.
+/// 分隔符是 ', '，绝不是中文顿号 '、'。这些名字被代入的句子来自 i18n 表，会被八种
+/// 语言阅读，而其中只有一种用 '、' 连接列表；在代码里选定分隔符，就会把这一种语言的
+/// 标点泄漏到另外七种——英文用户此前看到的正是这样：`Delete the following 3 files? a、b、c`。
+String sftpJoinedNames(Iterable<String> paths) =>
+    paths.map(sftpBaseName).join(', ');
+
 /// Joins [name] onto [parent] without doubling the separator.
 /// 将 [name] 拼接到 [parent] 下，且不重复分隔符。
 String sftpChildPath(String parent, String name) =>

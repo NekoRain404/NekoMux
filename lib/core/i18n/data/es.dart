@@ -394,4 +394,6 @@ const Map<String, String> esStrings = <String, String>{
   'theme_ocean': 'Azul océano',
   'theme_forest': 'Verde bosque',
   'theme_mono': 'Monocromo',
+  'credential_used_by_hosts':
+      '{0} hosts usan estas credenciales y dejarán de poder conectarse',
 };

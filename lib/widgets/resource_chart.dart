@@ -9,12 +9,26 @@ class ResourceChart extends StatelessWidget {
   final Color? cpuColor;
   final Color? ramColor;
 
+  /// Time between two consecutive points, used to label the x axis.
+  /// 相邻两个点之间的时间间隔，用于标注 X 轴。
+  ///
+  /// The left label is derived from it as `point count × interval`, so the span
+  /// the user reads is the span the caller actually sampled. It defaults to one
+  /// second, which is what this chart assumed while the labels were hardcoded —
+  /// a caller sampling every three seconds must pass its interval, or the axis
+  /// will claim a third of the real window.
+  /// 左侧标签由它推导（点数 × 间隔），因此用户读到的跨度就是调用方实际采样的跨度。
+  /// 默认 1 秒，即标签写死时本组件的假设——每三秒采样一次的调用方必须传入自己的
+  /// 间隔，否则坐标轴会声称只有真实窗口的三分之一。
+  final Duration sampleInterval;
+
   const ResourceChart({
     super.key,
     required this.cpuData,
     required this.ramData,
     this.cpuColor,
     this.ramColor,
+    this.sampleInterval = const Duration(seconds: 1),
   });
 
   @override
@@ -60,8 +74,12 @@ class ResourceChart extends StatelessWidget {
                 interval: 5,
                 getTitlesWidget: (value, meta) {
                   if (value.toInt() == 0 || value.toInt() == 19) {
+                    // `point count × interval`; with the default one-second
+                    // interval and 20 points this is the historical `20s`.
+                    // 「点数 × 间隔」；在默认 1 秒间隔与 20 个点下即历史上的 `20s`。
+                    final span = cpuData.length * sampleInterval.inSeconds;
                     return Text(
-                      value.toInt() == 0 ? '20s' : '0s',
+                      value.toInt() == 0 ? '${span}s' : '0s',
                       style: TextStyle(
                         color: cs.onSurface
                             .withValues(alpha: 0.6)

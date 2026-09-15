@@ -1,19 +1,31 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../core/haptics.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../models/credential.dart';
 import '../providers/providers.dart';
+import '../providers/settings_provider.dart';
+import '../providers/ssh_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
+import 'containers/container_action_sheet.dart';
+import 'containers/container_cards.dart';
+import 'containers/container_log_dialog.dart';
+import 'containers/docker_commands.dart';
+import 'containers/docker_container.dart';
+import 'containers/remote_action_outcome.dart';
 
 /// Real Docker container management page using SSH-based Docker commands.
 /// 基于 SSH 执行真实 Docker 命令的容器管理页面。
+///
+/// The page owns the connection and the container list, and nothing else: the
+/// command layer, the card, the action sheet and the log viewer live under
+/// `pages/containers/`.
+/// 本页只负责连接与容器列表：命令层、卡片、操作面板与日志查看器都在
+/// `pages/containers/` 下。
 class ContainerShellPage extends ConsumerStatefulWidget {
   /// Target host to connect to for Docker management.
   /// 用于 Docker 管理的目标主机。
@@ -25,13 +37,14 @@ class ContainerShellPage extends ConsumerStatefulWidget {
   ConsumerState<ContainerShellPage> createState() => _ContainerShellPageState();
 }
 
-/// Private state managing SSH connection, container listing, and lifecycle actions.
-/// 私有状态，管理 SSH 连接、容器列表和生命周期操作。
+/// Private state managing the SSH connection, the container list, and the
+/// lifecycle actions issued against it.
+/// 私有状态，管理 SSH 连接、容器列表，以及针对它发出的生命周期操作。
 class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
   bool _isLoading = true;
   bool _isRefreshing = false;
   String? _error;
-  List<_DockerContainer> _containers = [];
+  List<DockerContainer> _containers = [];
   SshConnection? _ssh;
   Credential? _credential;
 
@@ -89,6 +102,10 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
       _ssh = SshConnection(
         host: widget.host,
         credential: _credential!,
+        // Settings → connect timeout. This page used to inherit the
+        // constructor's default silently, so the setting reached nothing here.
+        // 设置 → 连接超时。本页此前静默沿用构造函数默认值，该设置在此毫无作用。
+        connectTimeout: ref.read(connectTimeoutProvider),
         onHostKeyVerify: buildHostKeyVerifier(
           db: db,
           address: widget.host.ipAddress,
@@ -132,7 +149,8 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
   /// Execute `docker ps -a` via SSH and parse the pipe-delimited output.
   /// 通过 SSH 执行 `docker ps -a` 并解析管道分隔的输出。
   Future<void> _fetchContainers() async {
-    if (_ssh == null || _ssh!.state != SshConnectionState.connected) {
+    final ssh = _ssh;
+    if (ssh == null || ssh.state != SshConnectionState.connected) {
       setState(() {
         _isLoading = false;
         _isRefreshing = false;
@@ -142,12 +160,17 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
     }
 
     try {
-      final output = await _ssh!.executeCommand(
-        "docker ps -a --format '{{.ID}}|{{.Image}}|{{.Names}}|{{.Status}}|{{.Ports}}|{{.RunningFor}}' 2>&1",
-      );
+      final result = await ssh.runCommand(dockerPsCommand);
+      final output = result.combined;
 
       /// If the output suggests Docker isn't installed, show a helpful message.
       /// 如果输出表明未安装 Docker，显示帮助信息。
+      ///
+      /// This check only picks which *message* to show; it is not a success
+      /// test. The exit status is used below for the one thing it can decide
+      /// here — whether the listing itself failed.
+      /// 该判断只用于挑选要展示的**文案**，不是成败判据；退出状态在下面用于它在此
+      /// 唯一能决定的事——列表命令本身是否失败。
       if (output.contains('not found') ||
           output.contains('command not found') ||
           output.contains('docker: command')) {
@@ -161,7 +184,36 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
         return;
       }
 
-      _containers = _parseDockerOutput(output);
+      /// A listing that failed outright says so instead of rendering an empty
+      /// list, which used to be indistinguishable from "no containers" — a user
+      /// outside the `docker` group saw an empty page rather than
+      /// `permission denied`.
+      /// 失败的列表命令直接说明原因，而不是渲染一个空列表——过去它与「没有容器」
+      /// 无法区分：不在 `docker` 组里的用户看到的是空页面，而不是
+      /// `permission denied`。
+      ///
+      /// Only an *explicitly* non-zero status counts here. A missing status is
+      /// not a failure for a read: the rows on stdout are still usable, and
+      /// refusing to show them would break the page on servers that report no
+      /// status at all. (An action is different — there the state change itself
+      /// cannot be confirmed, so unknown is not success.)
+      /// 这里只认**明确的**非零状态。读取操作中缺失的状态不算失败：stdout 上的行
+      /// 依然可用，拒绝展示会让「不上报退出状态」的服务器上的页面直接不可用。
+      /// （操作则不同——状态变更本身无法确认，因此未知不等于成功。）
+      final exitCode = result.exitCode;
+      if (exitCode != null && exitCode != 0) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _isRefreshing = false;
+            _error =
+                '${t('fetch_containers_failed')}: ${remoteFailureText(result)}';
+          });
+        }
+        return;
+      }
+
+      _containers = parseDockerOutput(output);
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -180,72 +232,61 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
     }
   }
 
-  /// Parse the pipe-delimited Docker CLI output into container objects.
-  /// 将管道分隔的 Docker CLI 输出解析为容器对象。
-  List<_DockerContainer> _parseDockerOutput(String output) {
-    final containers = <_DockerContainer>[];
-    final lines = output.trim().split('\n');
-
-    for (final line in lines) {
-      if (line.trim().isEmpty) continue;
-      final parts = line.split('|');
-      if (parts.length < 6) continue;
-
-      final id = parts[0].trim();
-      final image = parts[1].trim();
-      final name = parts[2].trim();
-      final statusRaw = parts[3].trim();
-      final ports = parts[4].trim();
-      final runningFor = parts[5].trim();
-
-      /// Parse status: "Up X hours" / "Up 3 days" = running, "Exited (0)..." = stopped.
-      /// 解析状态："Up X hours" / "Up 3 days" = 运行中，"Exited (0)..." = 已停止。
-      final isRunning = statusRaw.startsWith('Up ');
-      final statusText = isRunning
-          ? t('container_running')
-          : t('container_stopped');
-      final uptime = isRunning ? runningFor : '-';
-
-      containers.add(
-        _DockerContainer(
-          id: id,
-          name: name,
-          image: image,
-          isRunning: isRunning,
-          statusText: statusText,
-          statusRaw: statusRaw,
-          uptime: uptime,
-          ports: ports,
-        ),
-      );
-    }
-
-    return containers;
-  }
-
-  /// Execute a Docker lifecycle command (start/stop/restart/remove) via SSH.
-  /// 通过 SSH 执行 Docker 生命周期命令（启动/停止/重启/删除）。
-  Future<bool> _executeDockerCommand(String command, String successMsg) async {
-    if (_ssh == null || _ssh!.state != SshConnectionState.connected) {
+  /// Runs one lifecycle action and reports what the remote actually said.
+  /// 执行一个生命周期操作，并汇报远端实际给出的结果。
+  ///
+  /// Success is the exit status and nothing else. The old check —
+  /// `result.contains('Error') || result.contains('error')` over stdout and
+  /// stderr — reported a *successful* `docker stop` as failed whenever the
+  /// output merely mentioned the word, which a container named `error-logger`
+  /// guarantees: the user got an error toast and, because the failure path
+  /// skipped the refresh, a card still claiming "running".
+  /// 成败只看退出状态。旧判断是在 stdout+stderr 上做
+  /// `result.contains('Error') || result.contains('error')`：只要输出里出现这个
+  /// 词，**成功的** `docker stop` 也会被报成失败——名为 `error-logger` 的容器必然
+  /// 触发——用户看到错误提示，而且失败分支会跳过刷新，卡片就一直显示运行中。
+  Future<void> _runDockerAction(
+    DockerAction action,
+    DockerContainer container,
+  ) async {
+    final ssh = _ssh;
+    if (ssh == null || ssh.state != SshConnectionState.connected) {
       _showToast(t('ssh_not_connected'), isError: true);
-      return false;
+      return;
     }
 
     try {
-      final result = await _ssh!.executeCommand('$command 2>&1');
-      if (result.contains('Error') || result.contains('error')) {
+      final result = await ssh.runCommand(
+        dockerActionCommand(action, container.name),
+      );
+
+      final failure = remoteActionFailure(result);
+      if (failure != null) {
+        /// The remote's own words (`permission denied while trying to connect
+        /// to the Docker daemon socket`, `No such container`) replace the
+        /// generic tail the user cannot act on.
+        /// 远端自己的话（`permission denied while trying to connect to the
+        /// Docker daemon socket`、`No such container`）取代了用户无从下手的
+        /// 笼统描述。
         if (mounted) {
-          _showToast('${t('container_action_failed')}: $result', isError: true);
+          _showToast(
+            '${t('container_action_failed')}: $failure',
+            isError: true,
+          );
         }
-        return false;
+        return;
       }
-      if (mounted) _showToast(successMsg);
-      return true;
+
+      if (mounted) _showToast(dockerActionSuccessMessage(action));
+
+      /// Refresh only after a confirmed change: the list is now showing a state
+      /// the daemon has actually reached.
+      /// 只在确认发生变更后刷新：此时列表展示的状态是守护进程真正达到的状态。
+      await _fetchContainers();
     } catch (e) {
       if (mounted) {
         _showToast('${t('container_action_failed')}: $e', isError: true);
       }
-      return false;
     }
   }
 
@@ -253,7 +294,10 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
   /// 下拉刷新处理 — 重新获取容器列表。
   Future<void> _onRefresh() async {
     setState(() => _isRefreshing = true);
-    HapticFeedback.mediumImpact();
+    hapticIf(
+      ref.read(settingsProvider).value?.hapticEnabled,
+      HapticKind.medium,
+    );
 
     /// If disconnected, try to reconnect first.
     /// 如果连接断开，先尝试重连。
@@ -269,189 +313,26 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
 
   /// Shows a bottom sheet with container actions: start/stop/restart, logs, shell, remove.
   /// 显示底部操作弹窗，包含启动/停止/重启、日志、Shell、删除操作。
-  void _showContainerActions(_DockerContainer container) {
-    final cs = Theme.of(context).colorScheme;
-    HapticFeedback.lightImpact();
-    final isRunning = container.isRunning;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: cs.surface,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                container.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.jetBrainsMono(
-                  color: cs.onSurface,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                container.image,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.6),
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              /// Action buttons row. /// 操作按钮行。
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    if (!isRunning)
-                      _ActionButton(
-                        icon: Icons.play_arrow,
-                        label: t('start'),
-                        color: cs.primary,
-                        onTap: () async {
-                          Navigator.pop(ctx);
-                          final ok = await _executeDockerCommand(
-                            'docker start ${container.name}',
-                            t('container_start_success'),
-                          );
-                          if (ok) await _fetchContainers();
-                        },
-                      ),
-                    if (isRunning)
-                      _ActionButton(
-                        icon: Icons.stop,
-                        label: t('stop'),
-                        color: cs.error,
-                        onTap: () async {
-                          Navigator.pop(ctx);
-                          final ok = await _executeDockerCommand(
-                            'docker stop ${container.name}',
-                            t('container_stop_success'),
-                          );
-                          if (ok) await _fetchContainers();
-                        },
-                      ),
-                    _ActionButton(
-                      icon: Icons.restart_alt,
-                      label: t('restart'),
-                      color: cs.secondary,
-                      onTap: () async {
-                        Navigator.pop(ctx);
-                        final ok = await _executeDockerCommand(
-                          'docker restart ${container.name}',
-                          t('container_restart_success'),
-                        );
-                        if (ok) await _fetchContainers();
-                      },
-                    ),
-                    _ActionButton(
-                      icon: Icons.delete_outline,
-                      label: t('remove_container'),
-                      color: cs.error,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _confirmRemoveContainer(container);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-              Divider(height: 32, color: Theme.of(context).dividerColor),
-
-              AppCard(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showLogDialog(container);
-                },
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.article_outlined,
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                      size: 22,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        t('logs'),
-                        style: TextStyle(color: cs.onSurface, fontSize: 14),
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right,
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                      size: 20,
-                    ),
-                  ],
-                ),
-              ),
-
-              AppCard(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                color: cs.onSurface.withValues(alpha: 0.04),
-                borderColor: Theme.of(
-                  context,
-                ).dividerColor.withValues(alpha: 0.5),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.terminal,
-                      color: cs.onSurface.withValues(alpha: 0.34),
-                      size: 22,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        t('container_shell'),
-                        style: TextStyle(
-                          color: cs.onSurface.withValues(alpha: 0.46),
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                    AppBadge(
-                      label: t('soon_badge'),
-                      color: cs.onSurface.withValues(alpha: 0.42),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
+  void _showContainerActions(DockerContainer container) {
+    showContainerActionSheet(
+      context,
+      container: container,
+      // The sheet is a free function with no `Ref` of its own — it is this page
+      // that holds the settings, so the flag is passed in. Read here, at the
+      // moment the sheet opens, rather than cached: flipping the switch in
+      // Settings must take effect on the very next tap.
+      // 该面板是不持有 `Ref` 的自由函数——设置掌握在本页手中，因此把标志传入。在此
+      // 刻（面板打开时）读取而不是缓存：在设置里拨动开关后，下一次点击就必须生效。
+      hapticsEnabled: ref.read(settingsProvider).value?.hapticEnabled,
+      onAction: (action) => _runDockerAction(action, container),
+      onRemove: () => _confirmRemoveContainer(container),
+      onShowLogs: () => _showLogs(container),
     );
   }
 
   /// Shows a confirmation dialog before removing a container.
   /// 删除容器前显示确认对话框。
-  Future<void> _confirmRemoveContainer(_DockerContainer container) async {
+  Future<void> _confirmRemoveContainer(DockerContainer container) async {
     final confirmed = await showAppConfirmDialog(
       context,
       title: t('remove_container'),
@@ -462,125 +343,33 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
     );
     if (!confirmed) return;
 
-    final ok = await _executeDockerCommand(
-      'docker rm -f ${container.name}',
-      t('container_remove_success'),
-    );
-    if (ok) await _fetchContainers();
+    await _runDockerAction(DockerAction.remove, container);
+  }
+
+  /// The log text for [container], including the page's own failure lines.
+  /// [container] 的日志文本，包含页面自己给出的失败文案。
+  Future<String> _loadLogs(DockerContainer container) async {
+    final ssh = _ssh;
+    if (ssh == null || ssh.state != SshConnectionState.connected) {
+      return t('ssh_not_connected');
+    }
+    try {
+      final result = await ssh.runCommand(dockerLogsCommand(container.name));
+      final text = result.combined;
+      return text.isEmpty ? '(no output)' : text;
+    } catch (e) {
+      return '${t('error')}: $e';
+    }
   }
 
   /// Shows a dialog with real container logs fetched via SSH.
   /// 显示通过 SSH 获取的真实容器日志的对话框。
-  void _showLogDialog(_DockerContainer container) async {
-    final cs = Theme.of(context).colorScheme;
-
-    final terminalBg = cs.onSurface.withValues(alpha: 0.06);
-
-    /// Show a loading dialog first while fetching logs.
-    /// 首先显示加载对话框，同时获取日志。
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: cs.surface,
-        title: Text(
-          '${container.name} - ${t('logs')}',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: GoogleFonts.jetBrainsMono(color: cs.onSurface, fontSize: 15),
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 300,
-          child: Center(child: CircularProgressIndicator(color: cs.primary)),
-        ),
-      ),
-    );
-
-    String logText;
-    try {
-      if (_ssh != null && _ssh!.state == SshConnectionState.connected) {
-        logText = await _ssh!.executeCommand(
-          'docker logs --tail 50 ${container.name} 2>&1',
-        );
-        if (logText.isEmpty) logText = '(no output)';
-      } else {
-        logText = t('ssh_not_connected');
-      }
-    } catch (e) {
-      logText = '${t('error')}: $e';
-    }
-
-    /// Dismiss loading dialog and show logs.
-    /// 关闭加载对话框并显示日志。
-    if (mounted) Navigator.pop(context);
-
-    if (mounted) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: cs.surface,
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${container.name} - ${t('logs')}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.jetBrainsMono(
-                    color: cs.onSurface,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.copy,
-                  color: cs.onSurface.withValues(alpha: 0.6),
-                  size: 18,
-                ),
-                tooltip: t('copy'),
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: logText));
-                  _showToast(t('copied'));
-                },
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 300,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: terminalBg,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Theme.of(context).dividerColor.withValues(alpha: 0.7),
-                ),
-              ),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  logText,
-                  style: GoogleFonts.jetBrainsMono(
-                    color: cs.onSurface,
-                    fontSize: 11,
-                    height: 1.6,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(t('close'), style: TextStyle(color: cs.secondary)),
-            ),
-          ],
-        ),
-      );
-    }
-  }
+  Future<void> _showLogs(DockerContainer container) => showContainerLogsDialog(
+    context,
+    containerName: container.name,
+    loadLogs: () => _loadLogs(container),
+    onCopied: () => _showToast(t('copied')),
+  );
 
   /// Displays a brief toast message at the bottom of the screen.
   /// 在屏幕底部显示简短提示消息。
@@ -764,7 +553,7 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
               ),
             ),
             const SizedBox(height: 24),
-            _buildAddContainerNotice(),
+            const AddContainerNotice(),
           ],
         ),
       );
@@ -780,268 +569,14 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
         itemCount: _containers.length + 1,
         itemBuilder: (context, index) {
           if (index == _containers.length) {
-            return _buildAddContainerNotice();
+            return const AddContainerNotice();
           }
           final container = _containers[index];
-          return _buildContainerCard(container);
+          return ContainerCard(
+            container: container,
+            onTap: () => _showContainerActions(container),
+          );
         },
-      ),
-    );
-  }
-
-  Widget _buildAddContainerNotice() {
-    final cs = Theme.of(context).colorScheme;
-    return AppCard(
-      margin: const EdgeInsets.fromLTRB(14, 8, 14, 20),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      color: cs.onSurface.withValues(alpha: 0.035),
-      borderColor: Theme.of(context).dividerColor.withValues(alpha: 0.5),
-      child: Row(
-        children: [
-          AppIconBox(
-            icon: Icons.add_box_outlined,
-            color: cs.onSurface.withValues(alpha: 0.34),
-            size: 36,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              t('container_add_coming_soon'),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.52),
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          AppBadge(
-            label: t('soon_badge'),
-            color: cs.onSurface.withValues(alpha: 0.42),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Builds a container status card with name, image, status dot, uptime, and ports.
-  /// 构建容器状态卡片，显示名称、镜像、状态圆点、运行时间和端口映射。
-  Widget _buildContainerCard(_DockerContainer container) {
-    final cs = Theme.of(context).colorScheme;
-    final isRunning = container.isRunning;
-    final statusColor = isRunning ? cs.primary : cs.error;
-
-    return AppCard(
-      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-      padding: const EdgeInsets.all(14),
-      onTap: () => _showContainerActions(container),
-      borderColor: Theme.of(context).dividerColor.withValues(alpha: 0.5),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          /// Row 1: container name + status dot. /// 第一行：容器名称 + 状态圆点。
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  container.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.jetBrainsMono(
-                    color: cs.onSurface,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: statusColor,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: statusColor.withValues(alpha: 0.5),
-                      blurRadius: 4,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 6),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 120),
-                child: Text(
-                  container.statusText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          /// Row 2: image name. /// 第二行：镜像名称。
-          Row(
-            children: [
-              Icon(
-                Icons.layers_outlined,
-                color: cs.onSurface.withValues(alpha: 0.6),
-                size: 14,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  container.image,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.6),
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 6),
-
-          /// Row 3: uptime. /// 第三行：运行时间。
-          Row(
-            children: [
-              Icon(
-                Icons.timer_outlined,
-                color: cs.onSurface.withValues(alpha: 0.6),
-                size: 14,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '${t('container_uptime')}: ${container.uptime}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.6),
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 6),
-
-          /// Row 4: port mapping (if any). /// 第四行：端口映射（如有）。
-          if (container.ports.isNotEmpty)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.settings_ethernet,
-                  color: cs.onSurface.withValues(alpha: 0.6),
-                  size: 14,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    container.ports,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: cs.secondary.withValues(alpha: 0.8),
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Data class for a real Docker container parsed from CLI output.
-/// 从 CLI 输出解析的真实 Docker 容器数据类。
-class _DockerContainer {
-  final String id;
-  final String name;
-  final String image;
-  final bool isRunning;
-  final String statusText;
-  final String statusRaw;
-  final String uptime;
-  final String ports;
-
-  const _DockerContainer({
-    required this.id,
-    required this.name,
-    required this.image,
-    required this.isRunning,
-    required this.statusText,
-    required this.statusRaw,
-    required this.uptime,
-    required this.ports,
-  });
-}
-
-/// A compact action button used in the bottom sheet.
-/// 底部弹窗中使用的紧凑操作按钮。
-class _ActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: 72,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.3), width: 0.5),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

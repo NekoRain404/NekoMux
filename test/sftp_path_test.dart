@@ -78,6 +78,64 @@ void main() {
     });
   });
 
+  group('sftpJoinedNames', () {
+    test('joins display names with a comma and a space', () {
+      expect(sftpJoinedNames(['/var/a.txt', '/var/log/b.log']), 'a.txt, b.log');
+    });
+
+    test('uses no punctuation that belongs to one language', () {
+      // The ideographic comma '、' used to join these names, and the sentence
+      // they are substituted into comes from the i18n table in eight
+      // languages — seven of which do not write lists that way. English users
+      // read `Delete the following 3 files? a、b、c`.
+      // 这些名字此前用中文顿号 '、' 连接，而它们被代入的句子来自八种语言的 i18n 表，
+      // 其中七种并不这样书写列表。英文用户读到的是 `Delete the following 3 files? a、b、c`。
+      final joined = sftpJoinedNames(['/a', '/b', '/c']);
+      expect(joined, 'a, b, c');
+      expect(joined.contains('、'), isFalse);
+      // U+3000–U+303F, U+4E00–U+9FFF, U+FF00–U+FFEF.
+      expect(
+        RegExp(
+          '[\\u3000-\\u303f\\u4e00-\\u9fff\\uff00-\\uffef]',
+        ).hasMatch(joined),
+        isFalse,
+      );
+    });
+
+    test('copes with none, one, and a trailing-slash path', () {
+      expect(sftpJoinedNames(const []), '');
+      expect(sftpJoinedNames(['/var/log']), 'log');
+      expect(sftpJoinedNames(['/var/log/']), '');
+    });
+  });
+
+  group('sftpTextExtensions', () {
+    test('still declares every extension the preview has always opened', () {
+      // This set decides text preview versus the file actions sheet. It was
+      // extracted here verbatim and must not lose an entry while the file-type
+      // label moves out of the model.
+      // 这个集合决定「文本预览」还是「文件操作面板」。它是原样抽取到这里的，在文件类型
+      // 标签移出模型的改动中不能丢掉任何一项。
+      expect(sftpTextExtensions, {
+        'txt',
+        'json',
+        'conf',
+        'log',
+        'yml',
+        'yaml',
+        'xml',
+        'ini',
+        'sh',
+        'py',
+        'js',
+        'css',
+        'html',
+        'php',
+        'md',
+      });
+    });
+  });
+
   group('sftpBreadcrumbs', () {
     test('the root alone produces a single crumb', () {
       final crumbs = sftpBreadcrumbs('/');

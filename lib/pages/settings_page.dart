@@ -1,10 +1,12 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite/sqflite.dart';
+
 import '../core/i18n/strings.dart';
-import '../core/theme/app_theme.dart';
+import '../core/haptics.dart';
 import '../providers/providers.dart';
 import '../providers/settings_provider.dart';
 import '../providers/theme_provider.dart';
@@ -12,8 +14,25 @@ import '../services/backup_service.dart';
 import '../services/secure_storage.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
+import 'settings/backup_credentials.dart';
+import 'settings/backup_dialogs.dart';
+import 'settings/language_picker.dart';
+import 'settings/settings_tiles.dart';
+import 'settings/theme_picker.dart';
 
 /// Full settings page: appearance, connection, data, system.
+/// 完整设置页：外观、连接、数据、系统。
+///
+/// The page owns the flows — what a tap does, which provider or table it
+/// touches, what the user is told afterwards. The rows it lays out live in
+/// `settings/settings_tiles.dart`, the theme and language choosers in their own
+/// files, and the two backup rules that matter for safety — what an export may
+/// carry and what a restore may write to secure storage — in
+/// `settings/backup_credentials.dart`, where they can be tested on their own.
+/// 本页面持有各个流程——一次点击做什么、读写哪个 provider 或数据表、事后告诉用户
+/// 什么；它排布的行控件在 `settings/settings_tiles.dart`，主题与语言选择器在各自
+/// 文件中，而两条关乎安全的备份规则——导出允许携带什么、恢复允许向安全存储写入
+/// 什么——在 `settings/backup_credentials.dart`，可以单独测试。
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
   @override
@@ -71,8 +90,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         data: (s) => ListView(
           padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
-            _Hdr(title: t('appearance_label')),
-            _SliderT(
+            SettingsSectionHeader(title: t('appearance_label')),
+            SettingsSliderTile(
               icon: Icons.text_fields,
               title: t('terminal_font_size'),
               sub: t('terminal_font_sub'),
@@ -85,8 +104,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   _update(s.copyWith(terminalFontSize: v.round())),
             ),
             const SizedBox(height: 8),
-            _ThemePicker(),
-            _SwitchT(
+            const SettingsThemePicker(),
+            SettingsSwitchTile(
               icon: Icons.brightness_6,
               title: t('dark_mode'),
               sub: t('light_mode'),
@@ -98,8 +117,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
 
             Divider(height: 1, color: Theme.of(context).dividerColor),
-            _Hdr(title: t('connection_label')),
-            _SliderT(
+            SettingsSectionHeader(title: t('connection_label')),
+            SettingsSliderTile(
               icon: Icons.timer_outlined,
               title: t('conn_timeout_label'),
               sub: t('conn_timeout_sub'),
@@ -110,7 +129,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               display: '${s.connectTimeout} ${t('sec')}',
               onChanged: (v) => _update(s.copyWith(connectTimeout: v.round())),
             ),
-            _InputT(
+            SettingsInputTile(
               icon: Icons.settings_ethernet,
               title: t('default_ssh_port'),
               sub: t('default_port_sub'),
@@ -128,15 +147,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
 
             Divider(height: 1, color: Theme.of(context).dividerColor),
-            _Hdr(title: t('interaction_label')),
-            _SwitchT(
+            SettingsSectionHeader(title: t('interaction_label')),
+            SettingsSwitchTile(
               icon: Icons.vibration,
               title: t('haptic_feedback'),
               sub: t('haptic_feedback_sub'),
               value: s.hapticEnabled,
               onChanged: (v) => _update(s.copyWith(hapticEnabled: v)),
             ),
-            _ListT(
+            SettingsListTile(
               icon: Icons.language,
               title: t('language_label'),
               sub: AppStrings.supportedLanguages[s.language] ?? s.language,
@@ -144,22 +163,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
 
             Divider(height: 1, color: Theme.of(context).dividerColor),
-            _Hdr(title: t('data_label')),
-            _ActionT(
+            SettingsSectionHeader(title: t('data_label')),
+            SettingsActionTile(
               icon: Icons.upload_file,
               title: t('export_backup'),
               sub: t('export_backup_sub'),
               color: cs.secondary,
               onTap: () => _exportData(),
             ),
-            _ActionT(
+            SettingsActionTile(
               icon: Icons.download,
               title: t('restore_backup'),
               sub: t('restore_backup_sub'),
               color: cs.primary,
-              onTap: () => _showRestoreDialog(),
+              onTap: () => _restoreData(),
             ),
-            _ActionT(
+            SettingsActionTile(
               icon: Icons.delete_sweep_outlined,
               title: t('clear_data'),
               sub: t('clear_data_sub'),
@@ -168,13 +187,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
 
             Divider(height: 1, color: Theme.of(context).dividerColor),
-            _Hdr(title: t('about_label')),
-            const _InfoT(
+            SettingsSectionHeader(title: t('about_label')),
+            const SettingsInfoTile(
               icon: Icons.info_outline,
               title: 'NekoMux',
               sub: 'v1.0.0',
             ),
-            _InfoT(
+            SettingsInfoTile(
               icon: Icons.code,
               title: t('tech_stack'),
               sub: 'Flutter · dartssh2 · xterm · Riverpod · SQLite',
@@ -189,159 +208,127 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   void _update(AppSettings s) =>
       ref.read(settingsProvider.notifier).updateSettings(s);
 
-  /// Export all data to JSON and copy to clipboard.
+  /// Export all data as JSON and copy it to the clipboard.
+  /// 导出全部数据为 JSON 并复制到剪贴板。
+  ///
+  /// Credentials are excluded unless the user ticks the opt-in box in the
+  /// export dialog, and the payload then carries the same `'secure_storage'`
+  /// placeholder the database holds — no password and no private key ever
+  /// reaches the clipboard by default (audit finding sec-2). Dismissing the
+  /// dialog exports nothing: only an explicit choice can start an export.
+  /// 除非用户在导出对话框中勾选显式选项，否则凭据不会包含在内；此时载荷携带的只是
+  /// 数据库中那个 `'secure_storage'` 占位值——默认情况下密码与私钥都不会进入剪贴板
+  /// （审计问题 sec-2）。关闭对话框即不导出：只有明确的选择才会开始导出。
   Future<void> _exportData() async {
+    final includeSecrets = await showExportSecretsDialog(context);
+    if (includeSecrets == null || !mounted) return;
+
     final db = await ref.read(databaseProvider.future);
     final hosts = await db.query('tb_hosts');
     final creds = await ref.read(credentialListProvider.future);
     final snippets = await db.query('tb_snippets');
-    // Key names live in backup_service.dart so export and restore agree.
-    // 键名统一定义在 backup_service.dart，保证导出与恢复一致。
+    // Key names live in backup_service.dart so export and restore agree, and
+    // what a credential row may carry lives in backup_credentials.dart.
+    // 键名统一定义在 backup_service.dart，保证导出与恢复一致；凭据行允许携带什么
+    // 则定义在 backup_credentials.dart。
     final json = const JsonEncoder.withIndent('  ').convert(
       buildExportPayload(
         hosts: hosts,
-        credentials: creds.map((c) => c.toBackupMap()).toList(),
+        credentials: backupCredentialRows(
+          creds,
+          includeSecrets: includeSecrets,
+        ),
         snippets: snippets,
       ),
     );
     await Clipboard.setData(ClipboardData(text: json));
     if (mounted) {
-      _showSnack(t('export_success'));
+      // Say which of the two exports this was, so a user who walks away from
+      // the snackbar still knows whether the clipboard can get them back in.
+      // 说明这次是两种导出中的哪一种，即使用户没看到提示，也知道剪贴板里的内容
+      // 能否让自己直接登录回去。
+      _showSnack(
+        includeSecrets
+            ? '${t('export_success')} · ${t('export_secrets_warning')}'
+            : '${t('export_success')} · ${t('export_secrets_omitted')}',
+      );
     }
   }
 
   /// Show dialog to paste JSON and restore data.
-  void _showRestoreDialog() {
-    final cs = Theme.of(context).colorScheme;
-    final ctrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: cs.surfaceContainerHighest,
-        title: Text(
-          t('restore_backup'),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: cs.onSurface),
-        ),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 8,
-          style: TextStyle(
-            color: cs.onSurface,
-            fontSize: 12,
-            fontFamily: 'monospace',
-          ),
-          decoration: InputDecoration(
-            hintText: t('paste_json_hint'),
-            hintStyle: TextStyle(color: cs.onSurface.withValues(alpha: 0.42)),
-            filled: true,
-            fillColor: Theme.of(context).scaffoldBackgroundColor,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: Theme.of(context).dividerColor),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: cs.secondary),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              t('cancel'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.62)),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                // Parse and validate every section BEFORE touching the
-                // database, so a malformed payload cannot half-restore.
-                // 先解析并校验全部分节，再动数据库，避免恢复中途失败。
-                final payload = parseBackupPayload(ctrl.text);
-                final credentials = readBackupRows(
-                  payload,
-                  BackupSection.credentials,
-                );
-                final hosts = readBackupRows(payload, BackupSection.hosts);
-                final snippets = readBackupRows(
-                  payload,
-                  BackupSection.snippets,
-                );
+  /// 弹出对话框以粘贴 JSON 并恢复数据。
+  Future<void> _restoreData() async {
+    final raw = await showRestoreBackupDialog(context);
+    if (raw == null || !mounted) return;
+    try {
+      // Parse and validate every section BEFORE touching the database, so a
+      // malformed payload cannot half-restore.
+      // 先解析并校验全部分节，再动数据库，避免恢复中途失败。
+      final payload = parseBackupPayload(raw);
+      final credentials = readBackupRows(payload, BackupSection.credentials);
+      final hosts = readBackupRows(payload, BackupSection.hosts);
+      final snippets = readBackupRows(payload, BackupSection.snippets);
 
-                final db = await ref.read(databaseProvider.future);
-                // One transaction for all three tables: either the whole
-                // restore commits, or nothing does.
-                // 三张表共用同一事务：要么全部写入，要么全部回滚。
-                await db.transaction((txn) async {
-                  for (final row in credentials) {
-                    final id = row['id'] as String?;
-                    final secret = row['secret_data'] as String?;
-                    if (id == null || id.isEmpty) {
-                      throw FormatException('Invalid credential id');
-                    }
-                    if (secret != null &&
-                        secret.isNotEmpty &&
-                        secret != 'secure_storage') {
-                      await SecureStorage.saveCredential(id, secret);
-                    }
-                    await txn.insert(
-                      BackupSection.credentials.table,
-                      {...row, 'secret_data': 'secure_storage'},
-                      conflictAlgorithm: ConflictAlgorithm.replace,
-                    );
-                  }
+      final db = await ref.read(databaseProvider.future);
+      // One transaction for all three tables: either the whole restore
+      // commits, or nothing does.
+      // 三张表共用同一事务：要么全部写入，要么全部回滚。
+      await db.transaction((txn) async {
+        for (final row in credentials) {
+          final id = row['id'] as String?;
+          if (id == null || id.isEmpty) {
+            throw FormatException('Invalid credential id');
+          }
+          // A row from an export without secrets carries the placeholder, not a
+          // password, so it restores the metadata and leaves whatever secret
+          // the device already holds untouched — the placeholder is never
+          // written over a real credential.
+          // 不含密钥的导出的凭据行携带占位值而非密码，因此只恢复元数据，设备上已有的
+          // 密钥保持不变——占位值绝不会覆盖真正的凭据。
+          final secret = backupSecretToStore(row);
+          if (secret != null) {
+            await SecureStorage.saveCredential(id, secret);
+          }
+          await txn.insert(
+            BackupSection.credentials.table,
+            {...row, 'secret_data': secretStoragePlaceholder},
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
 
-                  // Merges by id, replacing duplicates; existing rows that are
-                  // not in the backup are left untouched.
-                  // 按 id 合并并覆盖重复项，备份中不存在的数据不会被删除。
-                  for (final row in hosts) {
-                    await txn.insert(
-                      BackupSection.hosts.table,
-                      row,
-                      conflictAlgorithm: ConflictAlgorithm.replace,
-                    );
-                  }
-                  for (final row in snippets) {
-                    await txn.insert(
-                      BackupSection.snippets.table,
-                      row,
-                      conflictAlgorithm: ConflictAlgorithm.replace,
-                    );
-                  }
-                });
+        // Merges by id, replacing duplicates; existing rows that are
+        // not in the backup are left untouched.
+        // 按 id 合并并覆盖重复项，备份中不存在的数据不会被删除。
+        for (final row in hosts) {
+          await txn.insert(
+            BackupSection.hosts.table,
+            row,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+        for (final row in snippets) {
+          await txn.insert(
+            BackupSection.snippets.table,
+            row,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      });
 
-                ref.invalidate(hostListProvider);
-                ref.invalidate(credentialListProvider);
-                ref.invalidate(snippetListProvider);
-                if (mounted) {
-                  _showSnack(t('restore_success'));
-                }
-              } catch (e) {
-                if (mounted) {
-                  _showSnack(
-                    t('restore_failed').replaceAll('{0}', e.toString()),
-                    isError: true,
-                  );
-                }
-              }
-            },
-            child: Text(
-              t('restore'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cs.primary),
-            ),
-          ),
-        ],
-      ),
-    );
+      ref.invalidate(hostListProvider);
+      ref.invalidate(credentialListProvider);
+      ref.invalidate(snippetListProvider);
+      if (mounted) {
+        _showSnack(t('restore_success'));
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack(
+          t('restore_failed').replaceAll('{0}', e.toString()),
+          isError: true,
+        );
+      }
+    }
   }
 
   Future<void> _clearAllConfirm() async {
@@ -355,690 +342,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
     if (!confirmed || !mounted) return;
 
-    HapticFeedback.heavyImpact();
-    final hNotifier = ref.read(hostListProvider.notifier);
-    for (final h in await ref.read(hostListProvider.future)) {
-      await hNotifier.deleteItem(h.id);
-    }
-    final cNotifier = ref.read(credentialListProvider.notifier);
-    for (final c in await ref.read(credentialListProvider.future)) {
-      await cNotifier.deleteItem(c.id);
-      await SecureStorage.deleteCredential(c.id);
-    }
-    final sNotifier = ref.read(snippetListProvider.notifier);
-    for (final s in await ref.read(snippetListProvider.future)) {
-      await sNotifier.deleteItem(s.id);
-    }
+    // Honours the switch this very page renders. It used to be the one call in
+    // the app that ignored it — a settings screen whose own feedback contradicted
+    // its own toggle.
+    // 遵守本页自己渲染的那个开关。它曾经是全应用唯一无视该开关的调用——一个设置页，
+    // 自身的反馈却与自身的开关相矛盾。
+    hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.heavy);
+    // One bulk delete per list, not a loop over deleteItem: each per-item call
+    // refreshes on its own, and the host notifier watches the credential
+    // notifier, so clearing N credentials used to rebuild the host list N times
+    // (audit finding rob-7). Secrets are handled inside the credential clear.
+    // 每个列表做一次批量删除，而不是循环 deleteItem：逐条调用各自刷新，而主机
+    // 通知器又 watch 凭据通知器，于是清空 N 条凭据会让主机列表重建 N 次
+    // （审计问题 rob-7）。密钥的清理在凭据的批量方法内部完成。
+    await ref.read(hostListProvider.notifier).clearAll();
+    await ref.read(credentialListProvider.notifier).clearAll();
+    await ref.read(snippetListProvider.notifier).clearAll();
     if (mounted) {
       _showSnack(t('all_data_cleared'));
     }
   }
 
-  void _showLanguagePicker() {
+  /// Ask for a language and apply it, if it is a change.
+  /// 询问语言并在确有变化时应用。
+  Future<void> _showLanguagePicker() async {
     final current = ref.read(languageProvider);
-    final languages = AppStrings.supportedLanguages;
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.62;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: Text(
-          t('language'),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-        ),
-        contentPadding: const EdgeInsets.fromLTRB(0, 8, 0, 12),
-        content: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 360, maxHeight: maxHeight),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: languages.entries.map((e) {
-                final selected = e.key == current;
-                return _LanguageOption(
-                  label: e.value,
-                  selected: selected,
-                  onTap: () {
-                    if (selected) {
-                      Navigator.pop(ctx);
-                      return;
-                    }
-                    ref.read(languageProvider.notifier).set(e.key);
-                    Navigator.pop(ctx);
-                  },
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LanguageOption extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _LanguageOption({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final accent = selected ? cs.primary : cs.onSurface.withValues(alpha: 0.46);
-    return AppCard(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      borderColor: selected ? cs.primary : Theme.of(context).dividerColor,
-      color: selected ? cs.primary.withValues(alpha: 0.08) : cs.surface,
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(
-            selected ? Icons.check_circle : Icons.circle_outlined,
-            color: accent,
-            size: 20,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: selected ? cs.primary : cs.onSurface,
-                fontSize: 14,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Theme picker widget — shows all 5 themes as tappable color preview cards.
-class _ThemePicker extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final currentId = ref.watch(themeIdProvider);
-    final presets = AppThemeDef.presets;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 32, bottom: 8, top: 4),
-            child: Text(
-              t('theme'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: 0.8),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          SizedBox(
-            height: 72,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: presets.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (_, i) {
-                final preset = presets[i];
-                final selected = preset.id == currentId;
-                return GestureDetector(
-                  onTap: () =>
-                      ref.read(themeIdProvider.notifier).set(preset.id),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    width: 100,
-                    decoration: BoxDecoration(
-                      color: preset.card,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: selected
-                            ? Theme.of(context).colorScheme.primary
-                            : preset.border,
-                        width: selected ? 2 : 1,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _ColorDot(color: preset.accent),
-                            const SizedBox(width: 4),
-                            _ColorDot(color: preset.accent2),
-                            const SizedBox(width: 4),
-                            _ColorDot(color: preset.danger),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          preset.nameZh,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: preset.text1,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ColorDot extends StatelessWidget {
-  final Color color;
-  const _ColorDot({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 10,
-      height: 10,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
-class _Hdr extends StatelessWidget {
-  final String title;
-  const _Hdr({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-      child: Text(
-        title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: cs.onSurface.withValues(alpha: 0.48),
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _SliderT extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String sub;
-  final String display;
-  final double value;
-  final double min;
-  final double max;
-  final int div;
-  final ValueChanged<double> onChanged;
-
-  const _SliderT({
-    required this.icon,
-    required this.title,
-    required this.sub,
-    required this.display,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.div,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return _SettingShell(
-      child: Row(
-        children: [
-          Icon(icon, color: cs.primary, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: cs.onSurface, fontSize: 14),
-                ),
-                Text(
-                  sub,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Text(
-            display,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: cs.primary,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: MediaQuery.sizeOf(context).width < 380 ? 92 : 120,
-            child: SliderTheme(
-              data: SliderThemeData(
-                trackHeight: 3,
-                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                activeTrackColor: cs.secondary,
-                inactiveTrackColor: cs.onSurface.withValues(alpha: 0.1),
-                thumbColor: cs.secondary,
-              ),
-              child: Slider(
-                value: value,
-                min: min,
-                max: max,
-                divisions: div,
-                onChanged: onChanged,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SwitchT extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String sub;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _SwitchT({
-    required this.icon,
-    required this.title,
-    required this.sub,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return _SettingShell(
-      onTap: () => onChanged(!value),
-      child: Row(
-        children: [
-          Icon(icon, color: cs.primary, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: cs.onSurface, fontSize: 14),
-                ),
-                Text(
-                  sub,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeThumbColor: cs.secondary,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InputT extends StatefulWidget {
-  final IconData icon;
-  final String title;
-  final String sub;
-  final String init;
-  final TextInputType type;
-  final String errorText;
-  final bool Function(String) onSubmit;
-
-  const _InputT({
-    required this.icon,
-    required this.title,
-    required this.sub,
-    required this.init,
-    required this.type,
-    required this.errorText,
-    required this.onSubmit,
-  });
-
-  @override
-  State<_InputT> createState() => _InputTState();
-}
-
-class _InputTState extends State<_InputT> {
-  late final TextEditingController _controller;
-  late final FocusNode _focusNode;
-  bool _hasError = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.init);
-    _focusNode = FocusNode();
-  }
-
-  @override
-  void didUpdateWidget(_InputT oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!_focusNode.hasFocus &&
-        oldWidget.init != widget.init &&
-        _controller.text != widget.init) {
-      _controller.text = widget.init;
-      _hasError = false;
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final ok = widget.onSubmit(_controller.text.trim());
-    setState(() => _hasError = !ok);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return _SettingShell(
-      child: Row(
-        children: [
-          Icon(widget.icon, color: _hasError ? cs.error : cs.primary, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: cs.onSurface, fontSize: 14),
-                ),
-                Text(
-                  _hasError ? widget.errorText : widget.sub,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _hasError
-                        ? cs.error
-                        : cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(
-            width: 80,
-            child: TextField(
-              controller: _controller,
-              focusNode: _focusNode,
-              keyboardType: widget.type,
-              style: TextStyle(color: cs.onSurface, fontSize: 12),
-              textAlign: TextAlign.center,
-              decoration: InputDecoration(
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 6,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(
-                    color: _hasError
-                        ? cs.error
-                        : Theme.of(context).dividerColor,
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(
-                    color: _hasError ? cs.error : cs.secondary,
-                  ),
-                ),
-              ),
-              onSubmitted: (_) => _submit(),
-              onEditingComplete: _submit,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ListT extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String sub;
-  final VoidCallback onTap;
-
-  const _ListT({
-    required this.icon,
-    required this.title,
-    required this.sub,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return _SettingShell(
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(icon, color: cs.primary, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cs.onSurface, fontSize: 14),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.48),
-                fontSize: 12,
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Icon(
-            Icons.chevron_right,
-            color: cs.onSurface.withValues(alpha: 0.3),
-            size: 20,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionT extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String sub;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _ActionT({
-    required this.icon,
-    required this.title,
-    required this.sub,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return _SettingShell(
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                Text(
-                  sub,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoT extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String sub;
-
-  const _InfoT({required this.icon, required this.title, required this.sub});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return _SettingShell(
-      child: Row(
-        children: [
-          Icon(icon, color: cs.primary.withValues(alpha: 0.6), size: 18),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cs.onSurface,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.48),
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingShell extends StatelessWidget {
-  final Widget child;
-  final VoidCallback? onTap;
-
-  const _SettingShell({required this.child, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      onTap: onTap,
-      child: child,
-    );
+    final selected = await showLanguagePickerDialog(context, current: current);
+    if (selected == null || selected == current || !mounted) return;
+    ref.read(languageProvider.notifier).set(selected);
   }
 }

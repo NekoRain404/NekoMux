@@ -172,7 +172,7 @@ class SftpFileList extends StatelessWidget {
                         if (!file.isDirectory) ...[
                           const SizedBox(width: 8),
                           AppBadge(
-                            label: file.fileType,
+                            label: sftpFileTypeLabel(file),
                             color: cs.onSurface.withValues(alpha: 0.42),
                           ),
                         ],

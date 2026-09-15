@@ -374,4 +374,5 @@ const Map<String, String> zhStrings = <String, String>{
   'theme_ocean': '深海蓝',
   'theme_forest': '森林绿',
   'theme_mono': '极简灰白',
+  'credential_used_by_hosts': '有 {0} 台主机正在使用此凭据，删除后它们将无法连接',
 };

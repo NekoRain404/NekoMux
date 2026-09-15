@@ -153,7 +153,7 @@ Future<bool> confirmSftpDelete(BuildContext context, String name) {
 /// Confirms deleting every path in [paths], naming them in the message.
 /// 确认删除 [paths] 中的每一个路径，并在正文中列出名称。
 Future<bool> confirmSftpBatchDelete(BuildContext context, List<String> paths) {
-  final names = paths.map(sftpBaseName).join('、');
+  final names = sftpJoinedNames(paths);
   return showAppConfirmDialog(
     context,
     title: t('batch_delete'),

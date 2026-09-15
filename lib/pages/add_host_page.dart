@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import '../core/haptics.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
+import '../providers/settings_provider.dart';
 import '../providers/ssh_provider.dart';
 import '../widgets/app_ui.dart';
 import 'credential_list_page.dart';
@@ -28,13 +29,44 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
   bool _isTesting = false;
   bool _isHandlingBack = false;
 
+  /// Fallback used while the settings are still loading. Equal to
+  /// `AppSettings.defaultPort`'s own default, so a cold start behaves exactly
+  /// as the app did before this setting was honoured at all.
+  /// 设置仍在加载时的兜底值，与 `AppSettings.defaultPort` 自身的默认值一致，使冷
+  /// 启动与本设置尚未被遵循时的行为完全相同。
+  static const int _kFallbackDefaultPort = 22;
+
+  /// Port a *new* host form is pre-filled with.
+  /// 新增主机表单预填的端口。
+  ///
+  /// Settings → default port used to persist a number that nothing outside the
+  /// settings page read: the field was seeded from a literal `22`, so a user
+  /// who chose 2222 was still shown 22 (audit: settings that lie).
+  /// 「设置 → 默认端口」此前持久化了一个除设置页外无人读取的数字：输入框以字面量
+  /// `22` 预填，因此选了 2222 的用户看到的仍然是 22（审计：会撒谎的设置）。
+  ///
+  /// Resolved **once**, into a field, rather than re-read wherever it is needed.
+  /// [_hasChanges] judges the port field against this same value, and a default
+  /// that could shift underneath it — the settings finishing their load while
+  /// this page is open — would make an untouched new-host form call itself
+  /// modified and nag about discarding changes.
+  /// 只解析**一次**并存为字段，而不是在各使用处重复读取。[_hasChanges] 用同一个值
+  /// 判断端口输入框，而一个可能在其脚下变化的默认值（本页打开期间设置加载完成）会让
+  /// 未经改动的新建表单自认为已被修改，并弹出「丢弃更改」的唠叨提示。
+  late final int _defaultPort;
+
   bool get _isEditing => widget.existingHost != null;
   bool get _hasChanges {
     final h = widget.existingHost;
     if (h == null) {
       return _aliasController.text.trim().isNotEmpty ||
           _ipController.text.trim().isNotEmpty ||
-          _portController.text.trim() != '22' ||
+          // Compared against the *same* default the field was seeded with: a
+          // hardcoded '22' here would brand every new-host form as dirty the
+          // moment the user's default port is anything else.
+          // 与输入框预填所用的**同一个**默认值比较：此处若写死 '22'，只要用户的默认
+          // 端口不是 22，任何新建表单一打开就会被判定为已修改。
+          _portController.text.trim() != _defaultPort.toString() ||
           _osType != 0 ||
           _selectedCredentialId != null;
     }
@@ -49,9 +81,13 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
   void initState() {
     super.initState();
     final h = widget.existingHost;
+    _defaultPort =
+        ref.read(settingsProvider).value?.defaultPort ?? _kFallbackDefaultPort;
     _aliasController = TextEditingController(text: h?.alias ?? '');
     _ipController = TextEditingController(text: h?.ipAddress ?? '');
-    _portController = TextEditingController(text: (h?.port ?? 22).toString());
+    _portController = TextEditingController(
+      text: (h?.port ?? _defaultPort).toString(),
+    );
     _osType = h?.osType ?? 0;
     _selectedCredentialId = h?.credentialId;
   }
@@ -117,7 +153,10 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
     }
 
     setState(() => _isTesting = true);
-    HapticFeedback.mediumImpact();
+    hapticIf(
+      ref.read(settingsProvider).value?.hapticEnabled,
+      HapticKind.medium,
+    );
 
     final creds = ref.read(credentialListProvider).value ?? [];
     final cred = creds.where((c) => c.id == _selectedCredentialId).firstOrNull;
@@ -138,17 +177,32 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
       credentialUsername: cred.username,
     );
 
-    final result = await testConnection(host: testHost, credential: cred);
+    // The test obeys the same connect timeout the real session will: it is the
+    // very handshake being measured, so a shorter default here would report a
+    // failure for a host that actually connects.
+    // 测试遵循与真实会话相同的连接超时：它测量的正是握手本身，此处若用更短的默认值，
+    // 会把实际能连上的主机报成失败。
+    final result = await testConnection(
+      host: testHost,
+      credential: cred,
+      connectTimeout: ref.read(connectTimeoutProvider),
+    );
 
     if (!mounted) return;
     setState(() => _isTesting = false);
 
     if (result == 'ok') {
       _showResult(t('conn_success_detail'), isError: false);
-      HapticFeedback.heavyImpact();
+      hapticIf(
+        ref.read(settingsProvider).value?.hapticEnabled,
+        HapticKind.heavy,
+      );
     } else {
       _showResult('❌ $result', isError: true);
-      HapticFeedback.heavyImpact();
+      hapticIf(
+        ref.read(settingsProvider).value?.hapticEnabled,
+        HapticKind.heavy,
+      );
     }
   }
 
@@ -193,7 +247,7 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
       isOnline: widget.existingHost?.isOnline ?? false,
     );
 
-    HapticFeedback.lightImpact();
+    hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.light);
 
     if (_isEditing) {
       ref.read(hostListProvider.notifier).updateItem(host);

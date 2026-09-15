@@ -113,16 +113,31 @@ class CredentialListPage extends ConsumerWidget {
     );
   }
 
-  /// Shows a confirmation dialog before deleting a credential. /// 删除凭据前显示确认对话框。
+  /// Shows a confirmation dialog before deleting a credential.
+  /// 删除凭据前显示确认对话框。
+  ///
+  /// The number of hosts that reference the credential is part of the warning.
+  /// The database does not enforce the declared foreign key, so deleting a
+  /// credential that is in use leaves those hosts behind holding a dangling
+  /// `credential_id`: they can never connect again, and nothing on screen
+  /// explains why. Nothing is cascaded and no constraint is switched on here —
+  /// the user is simply told what the deletion will cost before it happens.
+  /// 引用该凭据的主机数量也是警告的一部分。数据库并不强制声明的外键，因此删除正在
+  /// 使用的凭据会让这些主机留下悬空的 `credential_id`：它们再也无法连接，而界面上
+  /// 没有任何解释。这里既不做级联删除，也不启用约束——只是在删除发生前告知用户
+  /// 代价。
   Future<void> _confirmDelete(
     BuildContext context,
     WidgetRef ref,
     Credential cred,
   ) async {
+    final affectedHosts = await _countHostsUsing(ref, cred.id);
+    if (!context.mounted) return;
+
     final confirmed = await showAppConfirmDialog(
       context,
       title: t('confirm_delete'),
-      message: t('confirm_delete_credential').replaceAll('{0}', cred.name),
+      message: credentialDeleteConfirmation(cred.name, affectedHosts),
       cancelLabel: t('cancel'),
       confirmLabel: t('delete'),
       destructive: true,
@@ -131,6 +146,55 @@ class CredentialListPage extends ConsumerWidget {
 
     ref.read(credentialListProvider.notifier).deleteItem(cred.id);
   }
+
+  /// Counts the saved hosts whose `credential_id` is [credentialId].
+  /// 统计 `credential_id` 为 [credentialId] 的已保存主机数量。
+  ///
+  /// The host list is awaited rather than merely read: on a cold start the page
+  /// can be the first thing the app shows, and a synchronous read would find
+  /// the provider still unloaded and silently report zero. If the list cannot
+  /// be read at all the count falls back to zero — an unreadable host table
+  /// must not be able to block a deletion the user has decided on.
+  /// 这里等待主机列表，而不是仅仅读取：冷启动时本页面可能是应用显示的第一个界面，
+  /// 同步读取会得到尚未加载的提供者并默默报 0。若列表完全无法读取，计数回退为 0
+  /// ——不能因为主机表读不出来就阻止用户已经决定要做的删除。
+  Future<int> _countHostsUsing(WidgetRef ref, String credentialId) async {
+    try {
+      final hosts = await ref.read(hostListProvider.future);
+      return hosts.where((host) => host.credentialId == credentialId).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+}
+
+/// Confirmation text shown before the credential named [credentialName] is
+/// deleted, naming how many hosts reference it.
+/// 删除名为 [credentialName] 的凭据之前显示的确认文本，并说明有多少台主机引用它。
+///
+/// The count only appears when there is something to warn about, so the common
+/// case — a credential no host points at — keeps the plain confirmation.
+/// English would rather read "3 hosts use this credential", but the translation
+/// table has no key of that shape and `lib/core/i18n/**` is not this page's to
+/// edit; `<hosts label>: <count>` is composed from `my_hosts`, which exists in
+/// all eight languages. A dedicated key such as
+/// `credential_used_by_hosts: '{0} hosts use this credential'` is the change
+/// that would let this read as a sentence.
+/// 仅在有需要警告的内容时才出现计数，因此常见情形——没有主机引用该凭据——仍是
+/// 原来的确认文本。英文更希望读作 "3 hosts use this credential"，但翻译表中没有
+/// 这种形状的键，而 `lib/core/i18n/**` 不归本页面修改；`<主机标签>: <数量>` 由
+/// `my_hosts` 拼成，八种语言中都有这个键。若能新增
+/// `credential_used_by_hosts: '{0} hosts use this credential'` 这样的专用键，
+/// 这句话就能读成一个完整的句子。
+String credentialDeleteConfirmation(String credentialName, int affectedHosts) {
+  final base = t('confirm_delete_credential').replaceAll('{0}', credentialName);
+  if (affectedHosts <= 0) return base;
+  // A whole sentence, not a label plus a number: this line is the last thing
+  // between the user and breaking N hosts, and `credential_used_by_hosts` says
+  // what actually happens to them.
+  // 一句完整的话，而不是「标签 + 数字」：这一行是用户与「弄坏 N 台主机」之间的最后
+  // 一道提示，而 `credential_used_by_hosts` 说明了它们究竟会怎样。
+  return '$base\n${t('credential_used_by_hosts').replaceAll('{0}', '$affectedHosts')}';
 }
 
 /// A single credential list tile showing name, username, auth type, and actions. /// 单个凭据列表项，显示名称、用户名、认证类型及操作。

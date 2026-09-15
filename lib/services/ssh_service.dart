@@ -191,6 +191,25 @@ class SshConnection {
   final Future<bool> Function(String type, String fingerprint)?
   onHostKeyVerifyTyped;
 
+  /// Connect timeout applied when a caller does not pass one.
+  /// 调用方未传入时采用的连接超时。
+  ///
+  /// This is a *fallback*, not the user's setting. Settings → connect timeout
+  /// is read where the connection is built (see `connectTimeoutProvider`) and
+  /// passed in explicitly, so a wired page honours the number the user chose
+  /// while anything not wired behaves exactly as it did before that provider
+  /// existed. It is named so the fallback has a single definition: a caller
+  /// that has to pass it explicitly references this constant rather than
+  /// re-typing `10`, which is how the two could otherwise drift apart.
+  /// 这是**兜底值**，不是用户的设置。「设置 → 连接超时」在构造连接处读取
+  /// （见 `connectTimeoutProvider`）并显式传入，因此已接线的页面遵循用户选定的数字，
+  /// 而未接线的路径与该 provider 出现之前完全一致。具名是为了让兜底值只有一处定义：
+  /// 需要显式传入的调用方引用本常量，而不是重新写一遍 `10`——那正是两者可能漂移的
+  /// 原因。
+  static const Duration defaultConnectTimeout = Duration(seconds: 10);
+
+  /// Timeout for establishing the TCP/SSH session.
+  /// 建立 TCP/SSH 会话的超时时间。
   final Duration connectTimeout;
 
   /// Creates a new SSH connection for the given [host] and [credential].
@@ -200,7 +219,7 @@ class SshConnection {
     required this.credential,
     this.onHostKeyVerify,
     this.onHostKeyVerifyTyped,
-    this.connectTimeout = const Duration(seconds: 10),
+    this.connectTimeout = defaultConnectTimeout,
   });
 
   /// The verification callback to hand to dartssh2, derived from whichever of
@@ -215,8 +234,7 @@ class SshConnection {
   /// 优先使用 [onHostKeyVerifyTyped]；只有指纹的 [onHostKeyVerify] 会被适配成
   /// 同样的 `(type, fingerprint)` 形态——只有一条代码路径，因此调用点迁移到带类型
   /// 的回调（以便记录密钥类型）时，其验证行为不会有任何改变。
-  Future<bool> Function(String type, String fingerprint)?
-  get _hostKeyVerifier {
+  Future<bool> Function(String type, String fingerprint)? get _hostKeyVerifier {
     final typed = onHostKeyVerifyTyped;
     if (typed != null) return typed;
     final legacy = onHostKeyVerify;
@@ -347,9 +365,9 @@ class SshConnection {
         onVerifyHostKey: hostKeyVerifier == null
             ? null
             : (type, rawFingerprint) async => hostKeyVerifier(
-                  type,
-                  HostKeyVerifier.formatMd5(rawFingerprint),
-                ),
+                type,
+                HostKeyVerifier.formatMd5(rawFingerprint),
+              ),
       );
 
       // Publish the client before awaiting so that disconnect()/dispose() can

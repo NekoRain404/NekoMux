@@ -7,6 +7,7 @@ import '../models/credential.dart';
 import '../services/host_key_trust.dart';
 import '../services/known_hosts_store.dart';
 import '../services/ssh_service.dart';
+import 'settings_provider.dart';
 
 /// Provider that resolves to an [SshConnection] keyed by [hostId].
 /// 根据 [hostId] 解析为 [SshConnection] 的提供者。
@@ -19,11 +20,94 @@ final sshConnectionProvider =
       return AsyncData(null); // managed externally, placeholder / 外部管理，占位值
     });
 
+/// Fallback connect timeout, in seconds, for a read that lands before the
+/// settings have loaded.
+/// 设置加载完成前发生的读取所使用的兜底连接超时（秒）。
+///
+/// Kept equal to [SshConnection.defaultConnectTimeout] and to
+/// `AppSettings.connectTimeout`'s own default, so that "settings not loaded
+/// yet" behaves exactly as the app did before the setting was honoured at all —
+/// a cold start can never look like a regression.
+/// 与 [SshConnection.defaultConnectTimeout] 及 `AppSettings.connectTimeout` 自身
+/// 的默认值保持一致，使「设置尚未加载」与本设置尚未被遵循时的行为完全相同——冷启动
+/// 因此绝不会看起来像是一次退化。
+const int kDefaultConnectTimeoutSeconds = 10;
+
+/// The user's connect-timeout setting, as a [Duration].
+/// 用户的连接超时设置，以 [Duration] 表示。
+///
+/// Settings → connect timeout persisted a number that nothing outside the
+/// settings page ever read: every [SshConnection] was built with the
+/// constructor's own default, so choosing 30s changed nothing at all (audit:
+/// settings that lie). A page that opens a session now reads this where it
+/// builds the connection — the moment the value has to be decided — and passes
+/// it in.
+/// 「设置 → 连接超时」持久化的数字，除设置页外没有任何地方读取：每条
+/// [SshConnection] 都是用构造函数自身的默认值构造的，因此选 30 秒完全没有作用
+/// （审计：会撒谎的设置）。建立会话的页面现在在构造连接处读取本 provider——那正是
+/// 必须确定该值的时刻——并把它传进去。
+///
+/// Deliberately *not* used by the background reachability probe, which clamps
+/// it; see `home_page.dart` for why.
+/// 后台可达性探测刻意**不**使用它，而是对其做钳制；原因见 `home_page.dart`。
+final connectTimeoutProvider = Provider<Duration>((ref) {
+  final seconds = ref.watch(settingsProvider).value?.connectTimeout;
+  return Duration(seconds: seconds ?? kDefaultConnectTimeoutSeconds);
+});
+
+/// Ceiling on the connect timeout of a background reachability probe.
+/// 后台可达性探测的连接超时上限。
+///
+/// The `connectTimeout` setting is written for a connection the user asked for
+/// and is watching. A probe is the opposite case in every respect: it runs
+/// against *every* host, on every probe round, in the background, with nothing
+/// on screen waiting for it. A user-chosen 30s would pin one worker to each
+/// unreachable host for the full 30s, so a round over a handful of dead hosts
+/// would take minutes to settle — the list would still be showing stale
+/// statuses long after the user stopped caring, which reads as a hung app
+/// rather than a slow one. The default (10s) is already above this ceiling, so
+/// the common path keeps the fixed 4s the probe has always used.
+/// `connectTimeout` 设置是为用户主动发起、且正在等待的连接而写的。探测在每一方面都
+/// 恰恰相反：它在后台对**每一台**主机、每一轮都执行，屏幕上没有任何东西在等它。用户
+/// 选择 30 秒会让每个 worker 在每台不可达主机上耗满 30 秒，于是一轮下来只要有几台死
+/// 主机就要几分钟才能收敛——列表会在用户早已不再关心之后仍显示陈旧状态，那看起来像
+/// 应用卡死，而不是慢。默认值（10 秒）本就在本上限之上，因此常见路径保持探测一直使用
+/// 的固定 4 秒。
+const Duration kProbeConnectTimeoutCeiling = Duration(seconds: 4);
+
+/// The connect timeout a background reachability probe should use for a user
+/// who configured [configured].
+/// 当用户配置为 [configured] 时，后台可达性探测应采用的连接超时。
+///
+/// The setting is honoured where it is *shorter* than
+/// [kProbeConnectTimeoutCeiling] — someone on a slow link can ask for a longer
+/// probe wait — and clamped to it otherwise, so it can never make the
+/// background sweep take minutes. Interactive connections do not go through
+/// here: they take [connectTimeoutProvider] whole, because a page the user
+/// opened and is waiting on is exactly what the setting was for.
+/// 该设置仅在**短于** [kProbeConnectTimeoutCeiling] 时被采用——慢链路上的用户可以
+/// 把探测等待调长一些——否则钳制到上限，因此它绝不可能让后台扫描变成几分钟。交互式
+/// 连接不经过这里：它们完整采用 [connectTimeoutProvider]，因为用户打开并正在等待的
+/// 页面正是该设置存在的意义。
+Duration probeConnectTimeout(Duration configured) =>
+    configured < kProbeConnectTimeoutCeiling
+    ? configured
+    : kProbeConnectTimeoutCeiling;
+
 /// Performs a one-shot SSH connection test for the given [host] and [credential].
 /// 对给定的 [host] 和 [credential] 执行一次性 SSH 连接测试。
 ///
 /// Returns 'ok' on success, or a user-facing error message on failure.
 /// 成功时返回 'ok'，失败时返回面向用户的错误信息。
+///
+/// [connectTimeout] defaults to [SshConnection.defaultConnectTimeout]; callers
+/// that can reach the settings pass [connectTimeoutProvider] instead so the
+/// test obeys the same timeout the real session will. It stays optional rather
+/// than required: the setting is a preference, and this function must remain
+/// callable without a `Ref`.
+/// [connectTimeout] 默认为 [SshConnection.defaultConnectTimeout]；能够读到设置的
+/// 调用方改传 [connectTimeoutProvider]，使测试遵循与真实会话相同的超时。它保持可选
+/// 而非必填：该设置只是一项偏好，而本函数必须能在没有 `Ref` 的情况下被调用。
 ///
 /// The host key is verified like on every other connection path: this function
 /// used to build `SshConnection` without a verification callback, and
@@ -47,6 +131,7 @@ final sshConnectionProvider =
 Future<String> testConnection({
   required Host host,
   required Credential credential,
+  Duration connectTimeout = SshConnection.defaultConnectTimeout,
 }) async {
   SshConnection? service;
   try {
@@ -67,6 +152,7 @@ Future<String> testConnection({
     service = SshConnection(
       host: host,
       credential: credential,
+      connectTimeout: connectTimeout,
       onHostKeyVerify: buildHostKeyVerifier(
         db: db,
         address: host.ipAddress,

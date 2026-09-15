@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
+import '../providers/ssh_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
+import 'containers/remote_action_outcome.dart';
 
 class SystemdPage extends ConsumerStatefulWidget {
   final Host host;
@@ -79,6 +81,10 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
         _conn = SshConnection(
           host: host,
           credential: cred,
+          // Settings → connect timeout. This page used to inherit the
+          // constructor's default silently, so the setting reached nothing here.
+          // 设置 → 连接超时。本页此前静默沿用构造函数默认值，该设置在此毫无作用。
+          connectTimeout: ref.read(connectTimeoutProvider),
           onHostKeyVerify: buildHostKeyVerifier(
             db: db,
             address: host.ipAddress,
@@ -153,48 +159,62 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
     setState(() => _filtered = list);
   }
 
+  /// The one snackbar shape this page shows.
+  /// 本页唯一的提示条样式。
+  void _snack(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+
+  /// The failure line for [actionLabel], carrying [reason] verbatim.
+  /// [actionLabel] 的失败文案，原样带上 [reason]。
+  String _failureMessage(String actionLabel, String reason) => t(
+    'service_action_failed',
+  ).replaceAll('{0}', actionLabel).replaceAll('{1}', reason);
+
+  /// Runs one `systemctl` action and reports what the remote actually said.
+  /// 执行一次 `systemctl` 操作，并汇报远端实际给出的结果。
+  ///
+  /// Success used to be assumed, because the exit status never reached the page:
+  /// a non-root user stopping `docker.service` was told it had succeeded, while
+  /// the remote had answered `Interactive authentication required.`
+  /// 过去一律假设成功，因为退出状态根本没传到这里：非 root 用户停止
+  /// `docker.service` 时会被告知成功，而远端回的是 `Interactive authentication
+  /// required.`
   Future<void> _action(String unit, String action) async {
-    if (_conn == null) return;
+    final conn = _conn;
+    if (conn == null) return;
     final cs = Theme.of(context).colorScheme;
     final actionLabel = _actionLabel(action);
     try {
-      await MonitoringService.exec(_conn!, 'systemctl $action $unit');
+      final result = await conn.runCommand('systemctl $action $unit');
+      final failure = remoteActionFailure(result);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              t(
-                'service_action_success',
-              ).replaceAll('{0}', unit).replaceAll('{1}', actionLabel),
-            ),
-            backgroundColor: cs.primary,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
+        if (failure == null) {
+          _snack(
+            t(
+              'service_action_success',
+            ).replaceAll('{0}', unit).replaceAll('{1}', actionLabel),
+            cs.primary,
+          );
+        } else {
+          _snack(_failureMessage(actionLabel, failure), cs.error);
+        }
       }
+      // Refreshed after a failure too, unlike the container page: a failed
+      // `systemctl restart` may still have stopped the unit.
+      // 失败后同样刷新（与容器页不同）：失败的 `systemctl restart` 仍可能已经停掉了
+      // 该单元。
       await _load();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              t(
-                'service_action_failed',
-              ).replaceAll('{0}', actionLabel).replaceAll('{1}', e.toString()),
-            ),
-            backgroundColor: cs.error,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
-      }
+      if (mounted) _snack(_failureMessage(actionLabel, e.toString()), cs.error);
     }
   }
 

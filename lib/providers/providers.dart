@@ -76,6 +76,34 @@ class CredentialListNotifier extends AsyncNotifier<List<Credential>> {
     ref.invalidateSelf();
   }
 
+  /// Removes every credential and its stored secret, refreshing once.
+  /// 删除全部凭据及其已存储的密钥，且只刷新一次。
+  ///
+  /// Looping over [deleteItem] would work, but each call refreshes on its own
+  /// and this notifier is watched by the host notifier — so clearing N
+  /// credentials rebuilt the host list N times and re-queried both tables each
+  /// time. On a device with a few dozen saved hosts that is visible as a stall
+  /// on a button that should feel instant.
+  /// 循环调用 [deleteItem] 也能用，但它每删一条就自行刷新一次，而本通知器又被主机
+  /// 通知器 watch——于是清空 N 条凭据会让主机列表重建 N 次，每次都重查两张表。
+  /// 在存了几十台主机的设备上，这会让一个本应瞬间完成的按钮出现可见卡顿。
+  ///
+  /// Secrets are removed before the rows, so an interruption can only leave a
+  /// credential whose secret is gone (visible, and already handled elsewhere as
+  /// an empty secret) rather than a secret with no row pointing at it, which
+  /// nothing would ever clean up.
+  /// 先把密钥删掉再删行：中途中断只会留下一条密钥已丢失的凭据（可见，且其它地方
+  /// 已按空密钥处理），而不是一个没有任何行指向的密钥——那将永远无人清理。
+  Future<void> clearAll() async {
+    final db = await ref.read(databaseProvider.future);
+    final rows = await db.query('tb_credentials', columns: const ['id']);
+    for (final row in rows) {
+      await SecureStorage.deleteCredential(row['id']! as String);
+    }
+    await db.delete('tb_credentials');
+    ref.invalidateSelf();
+  }
+
   Future<Credential> _credentialFromRow(
     Database db,
     Map<String, Object?> map,
@@ -167,6 +195,16 @@ class HostListNotifier extends AsyncNotifier<List<Host>> {
   Future<void> deleteItem(String id) async {
     final db = await ref.read(databaseProvider.future);
     await db.delete('tb_hosts', where: 'id = ?', whereArgs: [id]);
+    ref.invalidateSelf();
+  }
+
+  /// Removes every host, refreshing once. See `CredentialListNotifier.clearAll`
+  /// for why the per-item loop is not good enough for a bulk wipe.
+  /// 删除全部主机，且只刷新一次。为何逐条循环不足以应付整批清空，见
+  /// `CredentialListNotifier.clearAll`。
+  Future<void> clearAll() async {
+    final db = await ref.read(databaseProvider.future);
+    await db.delete('tb_hosts');
     ref.invalidateSelf();
   }
 
@@ -271,6 +309,17 @@ class SnippetListNotifier extends AsyncNotifier<List<Snippet>> {
   Future<void> deleteItem(String id) async {
     final db = await ref.read(databaseProvider.future);
     await db.delete('tb_snippets', where: 'id = ?', whereArgs: [id]);
+    ref.invalidateSelf();
+  }
+
+  /// Removes every snippet, refreshing once. See
+  /// `CredentialListNotifier.clearAll` for why the per-item loop is not good
+  /// enough for a bulk wipe.
+  /// 删除全部片段，且只刷新一次。为何逐条循环不足以应付整批清空，见
+  /// `CredentialListNotifier.clearAll`。
+  Future<void> clearAll() async {
+    final db = await ref.read(databaseProvider.future);
+    await db.delete('tb_snippets');
     ref.invalidateSelf();
   }
 }

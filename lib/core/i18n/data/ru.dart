@@ -394,4 +394,6 @@ const Map<String, String> ruStrings = <String, String>{
   'theme_ocean': 'Океан',
   'theme_forest': 'Лес',
   'theme_mono': 'Монохром',
+  'credential_used_by_hosts':
+      'Этот учётные данные используют {0} хостов — после удаления они не смогут подключиться',
 };

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import '../core/haptics.dart';
 import '../core/i18n/strings.dart';
 import '../models/credential.dart';
 import '../providers/providers.dart';
+import '../providers/settings_provider.dart';
 import '../widgets/app_ui.dart';
 
 /// Page for adding a new credential or editing an existing one.
@@ -164,7 +165,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
   }
 
   void _save() {
-    HapticFeedback.lightImpact();
+    hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.light);
     if (!_formKey.currentState!.validate()) return;
     final cs = Theme.of(context).colorScheme;
 
@@ -304,6 +305,10 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                       label: t('password_auth'),
                       selected: _authType == 0,
                       color: cs.secondary,
+                      hapticsEnabled: ref
+                          .read(settingsProvider)
+                          .value
+                          ?.hapticEnabled,
                       onTap: () => _selectAuthType(0),
                     ),
                   ),
@@ -314,6 +319,10 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                       label: t('key_auth'),
                       selected: _authType == 1,
                       color: cs.primary,
+                      hapticsEnabled: ref
+                          .read(settingsProvider)
+                          .value
+                          ?.hapticEnabled,
                       onTap: () => _selectAuthType(1),
                     ),
                   ),
@@ -459,11 +468,19 @@ class _AuthTypeCard extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
 
+  /// Settings → haptic feedback, forwarded by the page: this card is a leaf
+  /// widget with no `Ref`, and the flag has to travel with the tap it belongs
+  /// to rather than being read from a global.
+  /// 「设置 → 触觉反馈」，由页面转发：本卡片是不持有 `Ref` 的叶子组件，标志必须随
+  /// 它所修饰的那次点击一同传入，而不是从全局读取。
+  final bool? hapticsEnabled;
+
   const _AuthTypeCard({
     required this.icon,
     required this.label,
     required this.selected,
     required this.color,
+    required this.hapticsEnabled,
     required this.onTap,
   });
 
@@ -473,7 +490,11 @@ class _AuthTypeCard extends StatelessWidget {
     final dividerColor = Theme.of(context).dividerColor;
     return GestureDetector(
       onTap: () {
-        HapticFeedback.selectionClick();
+        // Kept ahead of the (possibly early-returning) `onTap`: selecting the
+        // already-selected card used to click, and still does.
+        // 仍然先于（可能提前返回的）`onTap` 执行：点击已选中的卡片过去会发出反馈，
+        // 现在依然会。
+        hapticIf(hapticsEnabled, HapticKind.selection);
         onTap();
       },
       child: AnimatedContainer(

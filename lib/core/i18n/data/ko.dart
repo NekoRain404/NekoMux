@@ -378,4 +378,5 @@ const Map<String, String> koStrings = <String, String>{
   'theme_ocean': '오션 블루',
   'theme_forest': '포레스트 그린',
   'theme_mono': '모노크롬',
+  'credential_used_by_hosts': '{0}개의 호스트가 이 자격 증명을 사용 중이며, 삭제하면 연결할 수 없게 됩니다',
 };

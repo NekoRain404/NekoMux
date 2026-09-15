@@ -104,119 +104,33 @@ class _SnippetListPageState extends ConsumerState<SnippetListPage> {
     );
   }
 
-  /// Shows a dialog for adding or editing a snippet. /// 显示用于新增或编辑快捷指令的对话框。
-  void _showSnippetDialog({Snippet? existing}) {
-    final cs = Theme.of(context).colorScheme;
-    final isEditing = existing != null;
-    final titleController = TextEditingController(text: existing?.title ?? '');
-    final commandController = TextEditingController(
-      text: existing?.command ?? '',
+  /// Shows a dialog for adding or editing a snippet.
+  /// 显示用于新增或编辑快捷指令的对话框。
+  ///
+  /// The dialog builds the [Snippet] itself and hands it back; this method only
+  /// stores it. The editors the form needs belong to the dialog as well — see
+  /// [_SnippetFormDialog] for why releasing them here, once this future has
+  /// completed, is a few frames too early.
+  /// 对话框自己构造 [Snippet] 并交还，本方法只负责保存。表单需要的编辑器同样属于
+  /// 对话框——为什么在这个 future 完成后才去释放它们会早几帧，见 [_SnippetFormDialog]。
+  Future<void> _showSnippetDialog({Snippet? existing}) async {
+    final snippet = await showDialog<Snippet>(
+      context: context,
+      builder: (_) => _SnippetFormDialog(existing: existing),
     );
-    final formKey = GlobalKey<FormState>();
-    InputDecoration decoration(String label) {
-      return InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
-        filled: true,
-        fillColor: Theme.of(context).scaffoldBackgroundColor,
-        enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: Theme.of(context).dividerColor),
-          borderRadius: const BorderRadius.all(Radius.circular(8)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: cs.secondary, width: 1.5),
-          borderRadius: const BorderRadius.all(Radius.circular(8)),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: cs.error),
-          borderRadius: const BorderRadius.all(Radius.circular(8)),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: cs.error, width: 1.5),
-          borderRadius: const BorderRadius.all(Radius.circular(8)),
-        ),
-      );
+    if (snippet == null || !mounted) return;
+
+    final isEditing = existing != null;
+    if (isEditing) {
+      ref.read(snippetListProvider.notifier).updateItem(snippet);
+    } else {
+      ref.read(snippetListProvider.notifier).addItem(snippet);
     }
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: cs.surface,
-        title: Text(
-          isEditing ? t('edit_snippet') : t('add_snippet'),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: cs.onSurface),
-        ),
-        content: SingleChildScrollView(
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                /// Snippet title input. /// 指令名称输入。
-                TextFormField(
-                  controller: titleController,
-                  style: TextStyle(color: cs.onSurface),
-                  decoration: decoration(t('snippet_title')),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? t('must_enter_snippet_title')
-                      : null,
-                ),
-                const SizedBox(height: 16),
-
-                /// Snippet command body input (multi-line). /// 指令内容输入（多行）。
-                TextFormField(
-                  controller: commandController,
-                  style: TextStyle(color: cs.onSurface),
-                  maxLines: 5,
-                  decoration: decoration(t('snippet_command')),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? t('must_enter_snippet_command')
-                      : null,
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              t('cancel'),
-              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              if (!formKey.currentState!.validate()) return;
-
-              /// Build the Snippet model; reuse existing ID when editing. /// 构建 Snippet 模型；编辑时复用已有 ID。
-              final snippet = Snippet(
-                id: existing?.id ?? const Uuid().v4(),
-                title: titleController.text.trim(),
-                command: commandController.text.trim(),
-              );
-
-              if (isEditing) {
-                ref.read(snippetListProvider.notifier).updateItem(snippet);
-              } else {
-                ref.read(snippetListProvider.notifier).addItem(snippet);
-              }
-
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    isEditing ? t('snippet_updated') : t('snippet_added'),
-                  ),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            child: Text(t('save'), style: TextStyle(color: cs.secondary)),
-          ),
-        ],
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isEditing ? t('snippet_updated') : t('snippet_added')),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -234,6 +148,168 @@ class _SnippetListPageState extends ConsumerState<SnippetListPage> {
     if (!confirmed) return;
 
     ref.read(snippetListProvider.notifier).deleteItem(snippet.id);
+  }
+}
+
+/// The add/edit snippet form, which creates and releases the editors it needs.
+/// 新增/编辑快捷指令的表单，自行创建并释放所需的编辑器。
+///
+/// The two `TextEditingController`s used to be created per invocation in the
+/// page and never released, so every opening leaked them along with whatever
+/// had been typed. Releasing them from the page when `showDialog`'s future
+/// completes — the obvious repair — is early by a few frames: that future
+/// completes when the route is *popped*, while the dialog keeps animating out
+/// and its fields keep rebuilding, and a rebuild that reaches a released
+/// controller throws `A TextEditingController was used after being disposed`.
+/// 两个 `TextEditingController` 过去由页面按次创建且从不释放，于是每次打开都会连同
+/// 用户输入的内容一起泄漏。若改由页面在 `showDialog` 的 future 完成时释放——这是最
+/// 直觉的修补——则会早几帧：该 future 在路由被弹出时就完成，而对话框还要继续播放退场
+/// 动画并重建它的输入框，而一次重建若碰到已释放的控制器就会抛出
+/// `A TextEditingController was used after being disposed`。
+///
+/// Owning them here instead ties their lifetime to the dialog's own element,
+/// which is exactly the span during which its widgets can reach them.
+/// 把它们交给这里，生命周期就与对话框自身的 element 一致，而对话框的部件能访问它们的
+/// 时间正好也是这段区间。
+class _SnippetFormDialog extends StatefulWidget {
+  /// The snippet being edited, or null when a new one is being added.
+  /// 正在编辑的快捷指令；新增时为 null。
+  final Snippet? existing;
+
+  const _SnippetFormDialog({this.existing});
+
+  @override
+  State<_SnippetFormDialog> createState() => _SnippetFormDialogState();
+}
+
+class _SnippetFormDialogState extends State<_SnippetFormDialog> {
+  /// Validates both fields. A `GlobalKey` owns no resources, so unlike the
+  /// controllers below it needs no counterpart in [dispose].
+  /// 用于校验两个输入框。`GlobalKey` 不拥有资源，因此与下面的控制器不同，它不需要在
+  /// [dispose] 中有对应操作。
+  final _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _titleController;
+  late final TextEditingController _commandController;
+
+  bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(
+      text: widget.existing?.title ?? '',
+    );
+    _commandController = TextEditingController(
+      text: widget.existing?.command ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _commandController.dispose();
+    super.dispose();
+  }
+
+  /// Validates and closes the dialog with the snippet the user described.
+  /// 校验后带着用户描述的快捷指令关闭对话框。
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+
+    /// Build the Snippet model; reuse existing ID when editing. /// 构建 Snippet 模型；编辑时复用已有 ID。
+    Navigator.pop(
+      context,
+      Snippet(
+        id: widget.existing?.id ?? const Uuid().v4(),
+        title: _titleController.text.trim(),
+        command: _commandController.text.trim(),
+      ),
+    );
+  }
+
+  InputDecoration _decoration(String label) {
+    final cs = Theme.of(context).colorScheme;
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+      filled: true,
+      fillColor: Theme.of(context).scaffoldBackgroundColor,
+      enabledBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: cs.secondary, width: 1.5),
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: cs.error),
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: cs.error, width: 1.5),
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AlertDialog(
+      backgroundColor: cs.surface,
+      title: Text(
+        _isEditing ? t('edit_snippet') : t('add_snippet'),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: cs.onSurface),
+      ),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              /// Snippet title input. /// 指令名称输入。
+              TextFormField(
+                controller: _titleController,
+                style: TextStyle(color: cs.onSurface),
+                decoration: _decoration(t('snippet_title')),
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? t('must_enter_snippet_title')
+                    : null,
+              ),
+              const SizedBox(height: 16),
+
+              /// Snippet command body input (multi-line). /// 指令内容输入（多行）。
+              TextFormField(
+                controller: _commandController,
+                style: TextStyle(color: cs.onSurface),
+                maxLines: 5,
+                decoration: _decoration(t('snippet_command')),
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? t('must_enter_snippet_command')
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            t('cancel'),
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+          ),
+        ),
+        TextButton(
+          onPressed: _save,
+          child: Text(t('save'), style: TextStyle(color: cs.secondary)),
+        ),
+      ],
+    );
   }
 }
 

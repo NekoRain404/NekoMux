@@ -398,4 +398,6 @@ const Map<String, String> frStrings = <String, String>{
   'theme_ocean': 'Bleu océan',
   'theme_forest': 'Vert forêt',
   'theme_mono': 'Monochrome',
+  'credential_used_by_hosts':
+      '{0} hôtes utilisent cet identifiant et ne pourront plus se connecter',
 };

@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
+import '../providers/ssh_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
+import 'containers/remote_action_outcome.dart';
 
 class TaskManagerPage extends ConsumerStatefulWidget {
   final Host host;
@@ -83,6 +85,10 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
         _conn = SshConnection(
           host: host,
           credential: cred,
+          // Settings → connect timeout. This page used to inherit the
+          // constructor's default silently, so the setting reached nothing here.
+          // 设置 → 连接超时。本页此前静默沿用构造函数默认值，该设置在此毫无作用。
+          connectTimeout: ref.read(connectTimeoutProvider),
           onHostKeyVerify: buildHostKeyVerifier(
             db: db,
             address: host.ipAddress,
@@ -168,20 +174,50 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
     setState(() => _filtered = list);
   }
 
+  /// Kills one process and reports what the remote actually said.
+  /// 终止一个进程，并汇报远端实际给出的结果。
+  ///
+  /// The row used to be removed and "killed" reported unconditionally: a
+  /// non-root user killing a root process got
+  /// `kill: (1) - Operation not permitted` from the remote, the row vanished
+  /// anyway, and the process was still running.
+  /// 过去无条件移除该行并提示「已终止」：非 root 用户终止 root 进程时远端返回
+  /// `kill: (1) - Operation not permitted`，那一行照样消失，而进程其实还活着。
   Future<void> _killProcess(int pid) async {
-    if (_conn == null) return;
+    final conn = _conn;
+    if (conn == null) return;
     try {
-      await MonitoringService.exec(_conn!, 'kill -9 $pid');
+      final result = await conn.runCommand('kill -9 $pid');
+      final failure = remoteActionFailure(result);
+      if (failure != null) {
+        /// The row stays: the process is still there, and removing it would be
+        /// a claim the user only discovers to be false on the next refresh.
+        /// 该行保留：进程仍在，移除它等于给出一个用户下次刷新才会发现是假的说法。
+        ///
+        /// `service_action_failed` is the table's only "«action» failed:
+        /// «reason»" shape; a dedicated `kill_failed` key would read better but
+        /// adding keys is out of scope here.
+        /// `service_action_failed` 是表里唯一「«动作» 失败: «原因»」形态的键；
+        /// 专用的 `kill_failed` 会更贴切，但本次不允许新增键。
+        if (mounted) {
+          _showSnack(
+            t(
+              'service_action_failed',
+            ).replaceAll('{0}', t('kill_process')).replaceAll('{1}', failure),
+            isError: true,
+          );
+        }
+        return;
+      }
+      if (!mounted) return;
       setState(() {
         _allProcesses.removeWhere((p) => p['pid'] == pid);
         _applyFilter();
       });
-      if (mounted) {
-        _showSnack(
-          t('killed_pid').replaceAll('{0}', pid.toString()),
-          isError: true,
-        );
-      }
+      _showSnack(
+        t('killed_pid').replaceAll('{0}', pid.toString()),
+        isError: true,
+      );
     } catch (e) {
       if (mounted) {
         _showSnack('${t('error')}: $e', isError: true);

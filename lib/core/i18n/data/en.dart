@@ -392,4 +392,6 @@ const Map<String, String> enStrings = <String, String>{
   'theme_ocean': 'Ocean Blue',
   'theme_forest': 'Forest Green',
   'theme_mono': 'Monochrome',
+  'credential_used_by_hosts':
+      '{0} hosts use this credential and will stop being able to connect',
 };

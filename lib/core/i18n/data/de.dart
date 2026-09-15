@@ -396,4 +396,6 @@ const Map<String, String> deStrings = <String, String>{
   'theme_ocean': 'Ozeanblau',
   'theme_forest': 'Waldgrün',
   'theme_mono': 'Monochrom',
+  'credential_used_by_hosts':
+      '{0} Hosts verwenden diese Zugangsdaten und können danach keine Verbindung mehr herstellen',
 };

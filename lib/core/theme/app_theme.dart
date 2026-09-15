@@ -6,8 +6,6 @@ import 'package:google_fonts/google_fonts.dart';
 /// アプリのテーマ定義。各テーマにダークとライトの両バリアントを持ちます。
 class AppThemeDef {
   final String id;
-  final String nameZh;
-  final String nameEn;
   final Color bg;
   final Color card;
   final Color border;
@@ -24,8 +22,6 @@ class AppThemeDef {
 
   const AppThemeDef({
     required this.id,
-    required this.nameZh,
-    required this.nameEn,
     required this.bg,
     required this.card,
     required this.border,
@@ -207,8 +203,6 @@ class AppThemeDef {
   static final List<AppThemeDef> presets = [
     AppThemeDef(
       id: 'neko_dark',
-      nameZh: 'Neko 暗黑',
-      nameEn: 'Neko Dark',
       bg: Color(0xFF101612),
       card: Color(0xFF182019),
       border: Color(0xFF2B372D),
@@ -220,8 +214,6 @@ class AppThemeDef {
     ),
     AppThemeDef(
       id: 'eye_care',
-      nameZh: '护眼绿',
-      nameEn: 'Eye Care',
       bg: Color(0xFF12180F),
       card: Color(0xFF1B2317),
       border: Color(0xFF33402B),
@@ -238,8 +230,6 @@ class AppThemeDef {
     ),
     AppThemeDef(
       id: 'oled',
-      nameZh: 'OLED 纯黑',
-      nameEn: 'OLED Black',
       bg: Color(0xFF000000),
       card: Color(0xFF0B0D0B),
       border: Color(0xFF202820),
@@ -251,8 +241,6 @@ class AppThemeDef {
     ),
     AppThemeDef(
       id: 'ocean',
-      nameZh: '深海蓝',
-      nameEn: 'Ocean Blue',
       bg: Color(0xFF0E1820),
       card: Color(0xFF16242D),
       border: Color(0xFF2B3E49),
@@ -264,8 +252,6 @@ class AppThemeDef {
     ),
     AppThemeDef(
       id: 'forest',
-      nameZh: '森林绿',
-      nameEn: 'Forest Green',
       bg: Color(0xFF0F1A10),
       card: Color(0xFF172417),
       border: Color(0xFF2A3D2A),
@@ -277,8 +263,6 @@ class AppThemeDef {
     ),
     AppThemeDef(
       id: 'mono',
-      nameZh: '极简灰白',
-      nameEn: 'Monochrome',
       bg: Color(0xFF171917),
       card: Color(0xFF222522),
       border: Color(0xFF3A403A),

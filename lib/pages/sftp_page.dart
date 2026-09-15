@@ -17,6 +17,7 @@ import 'sftp/directory_load_state.dart';
 import 'sftp/file_selection.dart';
 import 'sftp/sftp_bars.dart';
 import 'sftp/sftp_dialogs.dart';
+import 'sftp/sftp_error_text.dart';
 import 'sftp/sftp_file_list.dart';
 import 'sftp/sftp_path.dart';
 
@@ -130,7 +131,12 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       if (!mounted) return;
       setState(() {
         _isConnecting = false;
-        _errorMessage = '${t('connection_failed')}：$e';
+        // Nothing here reached the service, so there is no code to map — the
+        // failure is reported as a failed connection with the raw detail, which
+        // is what an unexpected exception can honestly offer.
+        // 这里的失败根本没有到达 service，因此没有编码可映射——按连接失败上报并附带
+        // 原始细节，这也是一份意外异常能诚实提供的信息。
+        _errorMessage = sftpFailureText(SftpFailure.connect, '$e');
       });
       return;
     }
@@ -161,10 +167,12 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       await _loadDirectory('/');
     } on SftpException catch (e) {
       if (!mounted) return;
-      setState(() => _errorMessage = e.message);
+      setState(() => _errorMessage = sftpErrorText(e));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _errorMessage = '${t('connection_failed')}：$e');
+      setState(
+        () => _errorMessage = sftpFailureText(SftpFailure.connect, '$e'),
+      );
     } finally {
       // Guarded on purpose: connect() is awaited while the user can still press
       // back, and an unguarded setState here throws on every such exit.
@@ -220,9 +228,9 @@ class _SftpPageState extends ConsumerState<SftpPage> {
         _hasListingOnScreen = true;
       });
     } on SftpException catch (e) {
-      _handleLoadFailure(request, e.message);
+      _handleLoadFailure(request, sftpErrorText(e));
     } catch (e) {
-      _handleLoadFailure(request, '${t('list_failed')}：$e');
+      _handleLoadFailure(request, sftpFailureText(SftpFailure.list, '$e'));
     }
   }
 
@@ -284,6 +292,26 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// Opens a text file in the preview page.
   /// 用预览页面打开文本文件。
   Future<void> _openFile(FileItem file) async {
+    // Refuse before reading, not after. The preview page has its own size
+    // guard, but it only ever sees content that has already been pulled into
+    // memory: `readFile` buffers every chunk and the whole thing is decoded to
+    // a String first, so the out-of-memory happens before that guard can run.
+    // The directory listing already told us the size, so nothing needs to be
+    // fetched to make this decision.
+    // 在读之前就拒绝，而不是读完之后。预览页自己也有大小上限，但它看到的永远是
+    // 已经被读进内存的内容：`readFile` 会把每个分块都缓存下来，随后整份被解码成
+    // String，因此 OOM 发生在那个上限来得及生效之前。目录列表已经告诉我们大小，
+    // 做这个判断不需要拉取任何数据。
+    //
+    // Compared in bytes against a limit expressed in code units: for the ASCII
+    // logs and configs that matter, bytes >= code units, so this errs towards
+    // refusing a file that would in fact have fit — the safe direction.
+    // 用字节数与以「码元」表示的限额比较：对本场景真正要紧的 ASCII 日志与配置而言，
+    // 字节数 ≥ 码元数，所以这只会倾向于拒绝一个其实装得下的文件——是安全的方向。
+    if (file.size > FilePreviewPage.maxContentLength) {
+      _showSnack(t('file_too_large'), isError: true);
+      return;
+    }
     try {
       final bytes = await _sftpService!.readFile(file.path);
       if (!mounted) return;
@@ -309,14 +337,14 @@ class _SftpPageState extends ConsumerState<SftpPage> {
                 );
                 if (mounted) _showSnack(t('file_saved'));
               } on SftpException catch (e) {
-                if (mounted) _showSnack(e.message, isError: true);
+                if (mounted) _showSnack(sftpErrorText(e), isError: true);
               }
             },
           ),
         ),
       );
     } on SftpException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
+      if (mounted) _showSnack(sftpErrorText(e), isError: true);
     } on FormatException catch (_) {
       if (mounted) _showSnack(_loadFailedMessage(file.name), isError: true);
     } catch (e) {
@@ -373,7 +401,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       await _loadDirectory(_currentDir);
       if (mounted) _showSnack(t('file_renamed'));
     } on SftpException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
+      if (mounted) _showSnack(sftpErrorText(e), isError: true);
     }
   }
 
@@ -389,7 +417,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       await _loadDirectory(_currentDir);
       if (mounted) _showSnack(t('file_deleted'));
     } on SftpException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
+      if (mounted) _showSnack(sftpErrorText(e), isError: true);
     }
   }
 
@@ -421,7 +449,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
         _showSnack(isFolder ? t('folder_created') : t('file_created'));
       }
     } on SftpException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
+      if (mounted) _showSnack(sftpErrorText(e), isError: true);
     }
   }
 
@@ -442,10 +470,16 @@ class _SftpPageState extends ConsumerState<SftpPage> {
         await _sftpService!.deleteFile(path);
       } on SftpException catch (e) {
         failed++;
-        if (mounted) _showSnack(e.message, isError: true);
+        if (mounted) _showSnack(sftpErrorText(e), isError: true);
       } catch (e) {
         failed++;
-        if (mounted) _showSnack('$e', isError: true);
+        // Not an SftpException, so there is no code to map; report it as a
+        // failed delete with its detail rather than showing a raw exception.
+        // 不是 SftpException，因此没有编码可映射；按删除失败上报并附带细节，
+        // 而不是把原始异常直接显示出来。
+        if (mounted) {
+          _showSnack(sftpFailureText(SftpFailure.delete, '$e'), isError: true);
+        }
       }
     }
 

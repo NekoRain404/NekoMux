@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/strings.dart';
 import '../../models/file_item.dart';
 import 'sftp_path.dart';
 
@@ -63,9 +64,54 @@ Color sftpFileIconColor(FileItem file, ColorScheme cs) {
   }
 }
 
+/// Localised type label for [file], for the list badge and the actions sheet.
+/// [file] 的本地化类型标签，用于列表徽标与操作面板。
+///
+/// This is where a [FileCategory] becomes a word. The model exposes only the
+/// category, so the same build reads as "文件夹" in Chinese and "Folder" in
+/// English without the model knowing that either language exists — which is the
+/// bug this replaced: the label used to be composed inside the model, in
+/// Chinese, for all eight shipped languages.
+/// 这里是 [FileCategory] 变成文字的地方。模型只暴露类别，因此同一份构建在中文下读作
+/// 「文件夹」、英文下读作 "Folder"，而模型并不知道存在这两种语言——这正是被修复的
+/// 缺陷：标签此前在模型内部以中文组装，对全部八种语言一视同仁。
+String sftpFileTypeLabel(FileItem file) {
+  switch (file.category) {
+    case FileCategory.folder:
+      return t('file_type_folder');
+    case FileCategory.html:
+      return t('file_type_html');
+    case FileCategory.php:
+      return t('file_type_php');
+    case FileCategory.python:
+      return t('file_type_python');
+    case FileCategory.js:
+      return t('file_type_js');
+    case FileCategory.css:
+      return t('file_type_css');
+    case FileCategory.archive:
+      return t('file_type_archive');
+    case FileCategory.image:
+      return t('file_type_image');
+    case FileCategory.log:
+      return t('file_type_log');
+    case FileCategory.config:
+      return t('file_type_config');
+    case FileCategory.other:
+      // An extension this app has no word for is shown as itself, upper-cased —
+      // `.rs` reads `RS` in every language. That is a legitimate un-translated
+      // display, not a missing translation, and it is why the model still
+      // cannot supply this: only the view knows which file names it was given.
+      // 本应用没有对应词条的扩展名按其自身大写显示——`.rs` 在每种语言下都是 `RS`。
+      // 这是合理的非翻译展示，而不是翻译缺失；也正因如此模型仍然提供不了它：只有
+      // 视图知道自己收到了哪些文件名。
+      return sftpExtension(file.name).toUpperCase();
+  }
+}
+
 /// One-line summary of [file] for the actions sheet header.
 /// 操作面板标题中 [file] 的一行摘要。
 String sftpFileSubtitle(FileItem file) {
   if (file.isDirectory) return file.permissions;
-  return '${file.displaySize} · ${file.fileType} · ${file.permissions}';
+  return '${file.displaySize} · ${sftpFileTypeLabel(file)} · ${file.permissions}';
 }

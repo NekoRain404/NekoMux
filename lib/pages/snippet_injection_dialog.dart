@@ -25,47 +25,43 @@ class SnippetInjectionDialog {
       }
     }
 
-    /// Create a controller and focus node for each placeholder field.
-    final controllers = <String, TextEditingController>{};
-    final focusNodes = <String, FocusNode>{};
-    for (final p in placeholders) {
-      controllers[p] = TextEditingController();
-      focusNodes[p] = FocusNode();
-    }
-
-    final result = await showDialog<String>(
+    /// The dialog creates and releases one controller and focus node per
+    /// placeholder itself, so that their lifetime is the dialog's own — see
+    /// [_InjectionFormDialog] for why releasing them here, once this future has
+    /// completed, is a few frames too early.
+    /// 每个占位符所需的控制器与焦点节点由对话框自行创建与释放，使它们的生命周期与
+    /// 对话框一致——为什么在这个 future 完成后才去释放它们会早几帧，见
+    /// [_InjectionFormDialog]。
+    return showDialog<String>(
       context: context,
-      builder: (ctx) => _InjectionFormDialog(
-        placeholders: placeholders,
-        controllers: controllers,
-        focusNodes: focusNodes,
-        command: command,
-      ),
+      builder: (ctx) =>
+          _InjectionFormDialog(placeholders: placeholders, command: command),
     );
-
-    /// Dispose controllers and focus nodes regardless of the outcome.
-    for (final c in controllers.values) {
-      c.dispose();
-    }
-    for (final f in focusNodes.values) {
-      f.dispose();
-    }
-
-    return result;
   }
 }
 
 /// Internal dialog widget that renders a form with one field per placeholder.
+/// 内部对话框部件，为每个占位符渲染一个输入框。
+///
+/// The controllers and focus nodes it needs are created here and released in
+/// [dispose], so they live exactly as long as the dialog's own element.
+/// Creating them in [SnippetInjectionDialog.show] and releasing them when
+/// `showDialog`'s future completes — once their only repair — is early by a few
+/// frames: that future completes when the route is *popped*, while the dialog
+/// keeps animating out and its fields keep rebuilding, and a rebuild that
+/// reaches a released editor throws
+/// `A FocusNode was used after being disposed`.
+/// 它需要的控制器与焦点节点在此创建、在 [dispose] 中释放，因此生命周期与对话框自身的
+/// element 一致。若在 [SnippetInjectionDialog.show] 中创建、并在 `showDialog` 的
+/// future 完成时释放（这曾是唯一的补救做法），则会早几帧：该 future 在路由被弹出时就
+/// 完成，而对话框还要继续播放退场动画并重建输入框，一次重建若碰到已释放的编辑器就会
+/// 抛出 `A FocusNode was used after being disposed`。
 class _InjectionFormDialog extends StatefulWidget {
   final List<String> placeholders;
-  final Map<String, TextEditingController> controllers;
-  final Map<String, FocusNode> focusNodes;
   final String command;
 
   const _InjectionFormDialog({
     required this.placeholders,
-    required this.controllers,
-    required this.focusNodes,
     required this.command,
   });
 
@@ -74,8 +70,37 @@ class _InjectionFormDialog extends StatefulWidget {
 }
 
 class _InjectionFormDialogState extends State<_InjectionFormDialog> {
-  /// Form key for validating all placeholder fields.
+  /// Form key for validating all placeholder fields. A `GlobalKey` owns no
+  /// resources, so it needs no counterpart in [dispose].
+  /// 用于校验全部占位符输入框的表单键。`GlobalKey` 不拥有资源，因此无需在 [dispose]
+  /// 中有对应操作。
   final _formKey = GlobalKey<FormState>();
+
+  /// One text controller and focus node per placeholder, in [placeholders]
+  /// order.
+  /// 每个占位符一个文本控制器与焦点节点，顺序与 [placeholders] 一致。
+  final _controllers = <String, TextEditingController>{};
+  final _focusNodes = <String, FocusNode>{};
+
+  @override
+  void initState() {
+    super.initState();
+    for (final placeholder in widget.placeholders) {
+      _controllers[placeholder] = TextEditingController();
+      _focusNodes[placeholder] = FocusNode();
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    for (final focusNode in _focusNodes.values) {
+      focusNode.dispose();
+    }
+    super.dispose();
+  }
 
   /// Validates all fields and performs placeholder substitution, then pops with the result.
   void _confirm() {
@@ -83,7 +108,7 @@ class _InjectionFormDialogState extends State<_InjectionFormDialog> {
 
     var result = widget.command;
     for (final p in widget.placeholders) {
-      result = result.replaceAll('[$p]', widget.controllers[p]!.text);
+      result = result.replaceAll('[$p]', _controllers[p]!.text);
     }
     Navigator.pop(context, result);
   }
@@ -156,8 +181,8 @@ class _InjectionFormDialogState extends State<_InjectionFormDialog> {
               for (int i = 0; i < widget.placeholders.length; i++) ...[
                 if (i > 0) const SizedBox(height: 14),
                 TextFormField(
-                  controller: widget.controllers[widget.placeholders[i]],
-                  focusNode: widget.focusNodes[widget.placeholders[i]],
+                  controller: _controllers[widget.placeholders[i]],
+                  focusNode: _focusNodes[widget.placeholders[i]],
                   style: TextStyle(color: cs.onSurface),
                   textInputAction: i == widget.placeholders.length - 1
                       ? TextInputAction.done
@@ -166,8 +191,7 @@ class _InjectionFormDialogState extends State<_InjectionFormDialog> {
                   /// Advance focus to the next field on submit, or confirm on the last field.
                   onFieldSubmitted: (_) {
                     if (i < widget.placeholders.length - 1) {
-                      widget.focusNodes[widget.placeholders[i + 1]]
-                          ?.requestFocus();
+                      _focusNodes[widget.placeholders[i + 1]]?.requestFocus();
                     } else {
                       _confirm();
                     }

@@ -378,4 +378,5 @@ const Map<String, String> jaStrings = <String, String>{
   'theme_ocean': 'オーシャンブルー',
   'theme_forest': 'フォレストグリーン',
   'theme_mono': 'モノクローム',
+  'credential_used_by_hosts': '{0} 台のホストがこの認証情報を使用しており、削除すると接続できなくなります',
 };
