@@ -223,7 +223,7 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
     );
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedCredentialId == null) {
       _showResult(t('must_select_credential'), isError: true);
@@ -249,13 +249,27 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
 
     hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.light);
 
-    if (_isEditing) {
-      ref.read(hostListProvider.notifier).updateItem(host);
-      _showResult(t('host_updated'), isError: false);
-    } else {
-      ref.read(hostListProvider.notifier).addItem(host);
-      _showResult(t('host_added'), isError: false);
+    // Awaited, so the confirmation cannot precede the write. Un-awaited, a
+    // storage failure showed "saved", popped the page, and surfaced only as an
+    // unhandled async error — the user lost the host and was told it worked.
+    // 必须 await，否则确认提示可能早于落库。此前未 await：写盘失败时界面显示
+    // 「已保存」并关闭页面，只有一个未捕获的异步错误——用户丢了主机却被告知成功。
+    try {
+      final notifier = ref.read(hostListProvider.notifier);
+      if (_isEditing) {
+        await notifier.updateItem(host);
+      } else {
+        await notifier.addItem(host);
+      }
+    } catch (e) {
+      if (mounted) _showResult('${t('load_failed_msg')}: $e', isError: true);
+      return;
     }
+    if (!mounted) return;
+    _showResult(
+      _isEditing ? t('host_updated') : t('host_added'),
+      isError: false,
+    );
 
     Navigator.pop(context, true);
   }

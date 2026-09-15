@@ -164,7 +164,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
     });
   }
 
-  void _save() {
+  Future<void> _save() async {
     hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.light);
     if (!_formKey.currentState!.validate()) return;
     final cs = Theme.of(context).colorScheme;
@@ -184,11 +184,30 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
       secretData: secretData,
     );
 
-    if (_isEditing) {
-      ref.read(credentialListProvider.notifier).updateItem(cred);
-    } else {
-      ref.read(credentialListProvider.notifier).addItem(cred);
+    // Awaited, so the confirmation cannot precede the write — a secret that
+    // failed to reach secure storage used to be reported as saved.
+    // 必须 await，否则确认提示可能早于落库——写入安全存储失败的密钥此前会被报成
+    // 「已保存」。
+    try {
+      final notifier = ref.read(credentialListProvider.notifier);
+      if (_isEditing) {
+        await notifier.updateItem(cred);
+      } else {
+        await notifier.addItem(cred);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${t('load_failed_msg')}: $e'),
+            backgroundColor: cs.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
     }
+    if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

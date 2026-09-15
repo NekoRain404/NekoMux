@@ -144,7 +144,25 @@ class CredentialListPage extends ConsumerWidget {
     );
     if (!confirmed) return;
 
-    ref.read(credentialListProvider.notifier).deleteItem(cred.id);
+    // Awaited, so a failed delete is reported instead of leaving the row on
+    // screen with no explanation.
+    // 必须 await：删除失败时要给出提示，而不是让那一行留在界面上且毫无说明。
+    final notifier = ref.read(credentialListProvider.notifier);
+    try {
+      await notifier.deleteItem(cred.id);
+    } catch (e) {
+      // This page is stateless, so there is no `mounted` to consult — the
+      // messenger is looked up from the context that was checked above.
+      // 本页是无状态的，没有 `mounted` 可用——信使取自上面已校验过的 context。
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${t('load_failed_msg')}: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   /// Counts the saved hosts whose `credential_id` is [credentialId].

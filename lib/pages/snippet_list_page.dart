@@ -121,11 +121,27 @@ class _SnippetListPageState extends ConsumerState<SnippetListPage> {
     if (snippet == null || !mounted) return;
 
     final isEditing = existing != null;
-    if (isEditing) {
-      ref.read(snippetListProvider.notifier).updateItem(snippet);
-    } else {
-      ref.read(snippetListProvider.notifier).addItem(snippet);
+    // Awaited, so the confirmation cannot precede the write.
+    // 必须 await，否则确认提示可能早于落库。
+    try {
+      final notifier = ref.read(snippetListProvider.notifier);
+      if (isEditing) {
+        await notifier.updateItem(snippet);
+      } else {
+        await notifier.addItem(snippet);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${t('load_failed_msg')}: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
     }
+    if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -147,7 +163,18 @@ class _SnippetListPageState extends ConsumerState<SnippetListPage> {
     );
     if (!confirmed) return;
 
-    ref.read(snippetListProvider.notifier).deleteItem(snippet.id);
+    try {
+      await ref.read(snippetListProvider.notifier).deleteItem(snippet.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${t('load_failed_msg')}: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 }
 
