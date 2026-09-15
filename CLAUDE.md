@@ -61,6 +61,12 @@ either path.
 
 ## Open audit
 
-`docs/AUDIT-2026-09-15.html` lists 57 verified defects with `file:line` and fix
+`docs/AUDIT-2026-09-15.html` lists 54 verified defects with `file:line` and fix
 direction, ordered by severity, with the recommended fix order at the end. Check
 items off there as they are addressed.
+
+**Real capability beats feature count.** Two modules were deleted on 2026-09-15
+rather than repaired — a "local shell" and a "wireless ADB" page that fabricated
+plausible output, including a device list naming two devices that did not exist.
+Before adding a feature, confirm it can actually work; a plausible-looking fake
+entry is worse than an absent one.

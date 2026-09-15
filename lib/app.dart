@@ -5,10 +5,8 @@ import 'providers/theme_provider.dart';
 import 'pages/add_host_page.dart';
 import 'pages/credential_list_page.dart';
 import 'pages/home_page.dart';
-import 'pages/local_shell_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/snippet_list_page.dart';
-import 'pages/wireless_adb_page.dart';
 
 class NekoMuxApp extends ConsumerWidget {
   const NekoMuxApp({super.key});
@@ -28,10 +26,8 @@ class NekoMuxApp extends ConsumerWidget {
       home: const HomePage(),
       routes: {
         '/add-host': (_) => const AddHostPage(),
-        '/adb': (_) => const WirelessAdbPage(),
         '/credentials': (_) => const CredentialListPage(),
         '/settings': (_) => const SettingsPage(),
-        '/shell': (_) => const LocalShellPage(),
         '/snippets': (_) => const SnippetListPage(),
       },
     );

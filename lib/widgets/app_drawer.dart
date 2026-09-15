@@ -4,8 +4,6 @@ import '../core/i18n/strings.dart';
 import '../pages/credential_list_page.dart';
 import '../pages/snippet_list_page.dart';
 import '../pages/settings_page.dart';
-import '../pages/local_shell_page.dart';
-import '../pages/wireless_adb_page.dart';
 
 class AppDrawer extends ConsumerWidget {
   final String currentModule;
@@ -69,7 +67,6 @@ class AppDrawer extends ConsumerWidget {
                 ],
               ),
             ),
-            _Section(t('modules')),
             _Tile(
               icon: Icons.dns_outlined,
               title: t('my_hosts'),
@@ -79,30 +76,6 @@ class AppDrawer extends ConsumerWidget {
                 context,
                 '/',
                 selected: currentModule == 'hosts' && isTopLevel,
-              ),
-            ),
-            _Tile(
-              icon: Icons.terminal,
-              title: t('local_shell'),
-              subtitle: t('local_shell_subtitle'),
-              iconColor: cs.primary,
-              selected: currentModule == 'shell',
-              onTap: () => _go(
-                context,
-                const LocalShellPage(),
-                selected: currentModule == 'shell' && isTopLevel,
-              ),
-            ),
-            _Tile(
-              icon: Icons.adb,
-              title: t('wireless_adb'),
-              subtitle: t('wireless_adb_subtitle'),
-              iconColor: cs.secondary,
-              selected: currentModule == 'adb',
-              onTap: () => _go(
-                context,
-                const WirelessAdbPage(),
-                selected: currentModule == 'adb' && isTopLevel,
               ),
             ),
             const Divider(height: 1, indent: 20, endIndent: 20),
@@ -212,7 +185,6 @@ class _Tile extends StatelessWidget {
   final String? subtitle;
   final VoidCallback? onTap;
   final bool selected;
-  final Color? iconColor;
 
   const _Tile({
     required this.icon,
@@ -220,13 +192,12 @@ class _Tile extends StatelessWidget {
     this.subtitle,
     this.onTap,
     this.selected = false,
-    this.iconColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final c = iconColor ?? cs.primary;
+    final c = cs.primary;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Material(

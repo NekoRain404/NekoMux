@@ -686,7 +686,7 @@
     <div class="tier-head">
       <h2>P1 · 功能失效与连接泄漏</h2>
       <span class="note">假数据、假成功、设置不生效，以及在服务器上堆积的孤儿会话。</span>
-      <span class="tally" style="color:var(--p1);background:var(--p1-bg)">27 条</span>
+      <span class="tally" style="color:var(--p1);background:var(--p1-bg)">25 条</span>
     </div>
 
     <article class="f" data-sev="P1" data-id="fail-1">
@@ -881,21 +881,6 @@
       </div>
     </article>
 
-    <article class="f" data-sev="P1" data-id="fail-11">
-      <div class="f-rail">
-        <label class="mark"><input type="checkbox" data-id="fail-11" aria-label="标记 fail-11 已修复"><span></span></label>
-        <span class="sev sev-p1">P1</span><span class="f-id">fail-11</span>
-      </div>
-      <div class="f-main">
-        <h3 class="f-title">「本地终端」是纯 mock，用假数据冒充功能</h3>
-        <div class="f-refs"><code>local_shell_page.dart:125</code><code>local_shell_page.dart:46</code><code>app_drawer.dart:90</code></div>
-        <dl class="f-body">
-          <div class="f-row"><dt>问题</dt><dd><code>_executeCommand</code> 是个 <code>switch</code>，按命令名返回硬编码文本：<code>whoami</code> → <code>'termux'</code>，<code>uname -a</code> → 伪造的 <span class="m">Linux localhost 5.10.189-android13+ …</span>，<code>ls</code> → <code>_mockFiles</code> 常量。没有任何真实进程执行路径（无 <code>Process.start</code> 等）。</dd></div>
-          <div class="f-row"><dt>后果</dt><dd class="impact">它作为「本地终端」摆在抽屉里，输入 <code>ls</code> 会看到假文件列表，<code>uname -a</code> 返回假内核版本。这不是缺功能，是<b>用假数据冒充功能</b>——对以排障为卖点的工具是信任问题。</dd></div>
-          <div class="f-row"><dt>修复</dt><dd><span class="fix">接真实实现（仓库里那份 termux-app 克隆很可能就是为此准备的），或直接移除入口。</span></dd></div>
-        </dl>
-      </div>
-    </article>
 
     <article class="f" data-sev="P1" data-id="fail-12">
       <div class="f-rail">
@@ -993,21 +978,6 @@
       </div>
     </article>
 
-    <article class="f" data-sev="P1" data-id="state-6">
-      <div class="f-rail">
-        <label class="mark"><input type="checkbox" data-id="state-6" aria-label="标记 state-6 已修复"><span></span></label>
-        <span class="sev sev-p1">P1</span><span class="f-id">state-6</span>
-      </div>
-      <div class="f-main">
-        <h3 class="f-title">无线 ADB 连接在开关关闭后仍然写入「已连接」</h3>
-        <div class="f-refs"><code>wireless_adb_page.dart:88</code><code>wireless_adb_page.dart:50</code></div>
-        <dl class="f-body">
-          <div class="f-row"><dt>问题</dt><dd>连接路径 <code>await Future.delayed(2 秒)</code> 后无条件写入 <code>_adbStatusKey = 'adb_connected_to'</code> 并插入设备；<code>_toggleWirelessDebugging(false)</code> 只改状态，不使在途任务失效。</dd></div>
-          <div class="f-row"><dt>后果</dt><dd class="impact">开启无线调试 → 填 IP → 点连接 → 2 秒内关掉开关 → 状态卡翻回「ADB 已连接到 192.168.x.x:5555」并显示绿色链接图标，而开关是关的、两个输入框和连接按钮都已禁用。<b>界面状态自相矛盾。</b>（该页本身是 mock，无实际破坏。）</dd></div>
-          <div class="f-row"><dt>修复</dt><dd><span class="fix">加递增的请求序号，写入前比对；或让关闭开关使在途任务失效。</span></dd></div>
-        </dl>
-      </div>
-    </article>
 
     <article class="f" data-sev="P1" data-id="state-7">
       <div class="f-rail">
@@ -1310,7 +1280,7 @@
     <div class="tier-head">
       <h2>P3 · i18n 一致性与工程卫生</h2>
       <span class="note">不会立刻让功能失效，但会持续侵蚀可维护性与协作。</span>
-      <span class="tally" style="color:var(--p3);background:var(--p3-bg)">13 条</span>
+      <span class="tally" style="color:var(--p3);background:var(--p3-bg)">12 条</span>
     </div>
 
     <article class="f" data-sev="P3" data-id="i18n-1">
@@ -1361,21 +1331,6 @@
       </div>
     </article>
 
-    <article class="f" data-sev="P3" data-id="i18n-5">
-      <div class="f-rail">
-        <label class="mark"><input type="checkbox" data-id="i18n-5" aria-label="标记 i18n-5 已修复"><span></span></label>
-        <span class="sev sev-p3">P3</span><span class="f-id">i18n-5</span>
-      </div>
-      <div class="f-main">
-        <h3 class="f-title">本地终端的输出是硬编码英文，中英混排</h3>
-        <div class="f-refs"><code>local_shell_page.dart:61</code><code>local_shell_page.dart:134</code><code>local_shell_page.dart:203</code></div>
-        <dl class="f-body">
-          <div class="f-row"><dt>问题</dt><dd><code>'Device: Android'</code>、<code>'Architecture: aarch64'</code>、整段 <code>help</code> 列表、<code>'$cmd: command not found'</code> 都是英文，而页面外壳（<code>t('local_shell')</code>、<code>t('input_command_hint')</code>）是本地化的。</dd></div>
-          <div class="f-row"><dt>后果</dt><dd class="impact">默认中文界面下中英混排。（该页本身是 mock，见 fail-11——修那个之前不必单独修这个。）</dd></div>
-          <div class="f-row"><dt>修复</dt><dd><span class="fix">随 fail-11 一起处理。</span></dd></div>
-        </dl>
-      </div>
-    </article>
 
     <article class="f" data-sev="P3" data-id="i18n-4">
       <div class="f-rail">
@@ -1520,6 +1475,22 @@
         </dl>
       </div>
     </article>
+  </section>
+
+  <!-- ══════════════════ 已移除 ══════════════════ -->
+  <section class="panel">
+    <h2>已移除的两个假功能</h2>
+    <p class="note">
+      下面两个模块于 2026-09-15 从代码库中<b>直接删除</b>，连同它们的入口一起。记录在此是为了让审计保持完整——它们不是被修复的，是被移除的；四条相关缺陷也随之消解，而不是得到了修补。
+    </p>
+    <ul>
+      <li><b>本地终端</b> · <code>lib/pages/local_shell_page.dart</code>（491 行，已删除）——<code>_executeCommand</code> 是个 <code>switch</code>，按命令名返回硬编码文本：<code>whoami</code> → <code>'termux'</code>，<code>uname -a</code> → 伪造的内核版本串，<code>ls</code> → 一份常量文件列表。没有任何真实进程执行路径。</li>
+      <li><b>无线 ADB</b> · <code>lib/pages/wireless_adb_page.dart</code>（789 行，已删除）——<code>_connectToDevice</code> 只是 <code>await Future.delayed(2 秒)</code> 后无条件写入「已连接」；<code>_generateMockAdbOutput</code> 会编造出 <code>192.168.1.101:5555</code>、<code>.102:5555</code> 两台并不存在的设备，以及带真实时间戳的假 <code>logcat</code>、假的 <code>install ... Success</code>。它伪造的不是命令输出，而是设备列表本身。</li>
+    </ul>
+    <p class="note">
+      随之消解的四条缺陷：这两个模块的伪造本身（原 fail-11、fail-14）、无线 ADB 的开关竞态（原 state-6）、以及本地终端输出的英文硬编码（原 i18n-5）。
+      删除的只有入口与页面：<code>app_drawer.dart</code> 的两个瓷片、<code>app.dart</code> 的 <code>/shell</code> 与 <code>/adb</code> 两条路由。相关的 i18n key 暂留未删（无害），待后续清理。若之后要做真实的本地终端，Android 上需要 <code>adb</code> 或 Termux 侧的配合——那是一个从零开始的功能，不是恢复这两份文件。
+    </p>
   </section>
 
   <!-- ══════════════════ 功能缺口 ══════════════════ -->
