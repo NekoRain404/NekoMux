@@ -419,4 +419,9 @@ const Map<String, String> deStrings = <String, String>{
   'known_hosts_forget_confirm':
       'Schlüssel für {0} entfernen?\nDie nächste Verbindung fragt erneut nach.',
   'known_hosts_trusted_at': 'Akzeptiert am',
+  'host_group': 'Gruppe',
+  'host_group_hint': 'Leer lassen für keine Gruppe',
+  'host_group_none': 'Ohne Gruppe',
+  'search_hosts': 'Name, Adresse oder Benutzer suchen',
+  'no_search_results': 'Keine passenden Hosts',
 };

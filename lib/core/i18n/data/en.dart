@@ -415,4 +415,9 @@ const Map<String, String> enStrings = <String, String>{
   'known_hosts_forget_confirm':
       'Forget the key for {0}?\nThe next connection to this host will ask again.',
   'known_hosts_trusted_at': 'Accepted',
+  'host_group': 'Group',
+  'host_group_hint': 'Leave empty for no group',
+  'host_group_none': 'Ungrouped',
+  'search_hosts': 'Search name, address or username',
+  'no_search_results': 'No hosts match',
 };

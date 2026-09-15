@@ -399,4 +399,9 @@ const Map<String, String> jaStrings = <String, String>{
   'known_hosts_forget': '記録を削除',
   'known_hosts_forget_confirm': '{0} の鍵記録を削除しますか？\n次回の接続時に再確認されます。',
   'known_hosts_trusted_at': '承認日時',
+  'host_group': 'グループ',
+  'host_group_hint': '空欄にするとグループなし',
+  'host_group_none': 'グループなし',
+  'search_hosts': '名前・アドレス・ユーザー名で検索',
+  'no_search_results': '一致するホストがありません',
 };

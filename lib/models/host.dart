@@ -64,6 +64,27 @@ class Host {
   /// 操作系统类型：0 = Linux，1 = Windows。
   final int osType;
 
+  /// Group this host belongs to — "production", "staging", a customer name —
+  /// or `null` for a host the user has not grouped.
+  /// 此主机所属的分组——「生产」「预发布」或某个客户名——未分组的主机为 `null`。
+  ///
+  /// `null` and the empty string are *not* two different states to the user: a
+  /// blank group field means "no group", so [fromMap] folds an empty or
+  /// whitespace-only value down to `null` rather than letting a stray space
+  /// create a group that looks unnamed and sorts before every real one.
+  /// 对用户而言 `null` 与空字符串**不是**两种状态：分组输入框留空就是「不分组」，因此
+  /// [fromMap] 会把空值或纯空白折叠为 `null`，而不是让一个多余的空格造出一个看起来
+  /// 无名、却排在所有真实分组之前的分组。
+  ///
+  /// Stored as free text rather than a foreign key: a group is a label the user
+  /// types, not an entity with a lifetime of its own. Deleting the last host of
+  /// a group must not leave a group row behind to clean up, and renaming one is
+  /// not a feature anybody asked for.
+  /// 以自由文本而非外键存储：分组是用户随手输入的标签，不是有独立生命周期的实体。
+  /// 删掉某分组的最后一台主机不应留下需要清理的分组记录，而重命名分组也不是任何人
+  /// 要求过的功能。
+  final String? groupName;
+
   /// Reachability state of the host, as far as we can honestly establish it.
   /// 主机的可达性状态，限我们能够诚实确定的范围。
   ///
@@ -111,6 +132,7 @@ class Host {
     this.credentialName,
     this.credentialUsername,
     this.osType = 0,
+    this.groupName,
     HostStatus status = HostStatus.unverified,
     bool? isOnline,
   }) : status = isOnline == null
@@ -169,6 +191,14 @@ class Host {
 
   /// Creates a copy of this instance with optionally overridden fields.
   /// 创建此实例的副本，可选择性覆盖字段值。
+  ///
+  /// Like the credential fields, an omitted [groupName] keeps the current one
+  /// and there is no way to clear it here — `null` already means "leave it".
+  /// Clearing is not needed by any caller: the edit form builds a whole new
+  /// [Host] on save, turning a blank group field into `null` there.
+  /// 与凭据字段一样，省略 [groupName] 表示保留原值，此处无法将其清除——`null` 已经
+  /// 表示「保持不变」。没有任何调用方需要清除：编辑表单在保存时构造全新的 [Host]，
+  /// 在那一步把空的分组输入变成 `null`。
   Host copyWith({
     String? id,
     String? alias,
@@ -178,6 +208,7 @@ class Host {
     String? credentialName,
     String? credentialUsername,
     int? osType,
+    String? groupName,
     HostStatus? status,
   }) {
     return Host(
@@ -189,6 +220,7 @@ class Host {
       credentialName: credentialName ?? this.credentialName,
       credentialUsername: credentialUsername ?? this.credentialUsername,
       osType: osType ?? this.osType,
+      groupName: groupName ?? this.groupName,
       status: status ?? this.status,
     );
   }
@@ -205,10 +237,22 @@ class Host {
     'port': port,
     'credential_id': credentialId,
     'os_type': osType,
+    'group_name': groupName,
   };
 
   /// Deserializes a host from a database row map.
   /// 从数据库行映射反序列化主机对象。
+  ///
+  /// `group_name` is read defensively. A row that predates the v4 migration, a
+  /// row from a hand-edited database, or a row from an older backup all arrive
+  /// without a usable value for it, and none of those may turn into a throw
+  /// that takes the whole host list down — the user would lose sight of hosts
+  /// they still have. Anything that is not a non-blank string reads as
+  /// "ungrouped".
+  /// `group_name` 以防御性方式读取。早于 v4 迁移的行、来自手工编辑过的数据库的行、
+  /// 或来自旧备份的行，都不带可用的该字段值，而这些情况中的任何一种都不能变成抛异常
+  /// 并连带整个主机列表一起失败——那会让用户看不见他们仍然拥有的主机。凡不是「非空白
+  /// 字符串」的值，一律读作「未分组」。
   factory Host.fromMap(Map<String, dynamic> map) => Host(
     id: map['id'] as String,
     alias: map['alias'] as String,
@@ -216,5 +260,20 @@ class Host {
     port: map['port'] as int,
     credentialId: map['credential_id'] as String,
     osType: map['os_type'] as int,
+    groupName: normalizeGroupName(map['group_name']),
   );
+
+  /// Normalizes a stored or typed group name to the one shape the rest of the
+  /// app compares against: a non-blank string, or `null` for "no group".
+  /// 把存储的或用户输入的分组名归一化为应用其余部分统一比较的形态：非空白字符串，
+  /// 或表示「未分组」的 `null`。
+  ///
+  /// Kept here, next to the field, so the database read, the form's save and the
+  /// dirty check cannot each invent their own idea of what "blank" means.
+  /// 放在字段旁边，使数据库读取、表单保存与脏检查不会各自发明一套「留空」的定义。
+  static String? normalizeGroupName(Object? raw) {
+    if (raw is! String) return null;
+    final trimmed = raw.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
 }

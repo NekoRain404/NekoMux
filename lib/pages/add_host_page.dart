@@ -8,6 +8,7 @@ import '../providers/providers.dart';
 import '../providers/settings_provider.dart';
 import '../providers/ssh_provider.dart';
 import '../widgets/app_ui.dart';
+import 'hosts/host_list_model.dart';
 import 'credential_list_page.dart';
 
 /// Page for adding a new host or editing an existing one. / 新增主机或编辑已有主机的页面。
@@ -24,6 +25,13 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
   late final TextEditingController _aliasController;
   late final TextEditingController _ipController;
   late final TextEditingController _portController;
+
+  /// Optional group, so hosts can be grouped by role or environment on the home
+  /// list. Blank means no group — normalized on save through the model's own
+  /// rule, so the form and the database cannot disagree about what blank means.
+  /// 可选分组，让主机在首页按角色或环境归类。留空表示不分组——保存时经由模型自身的
+  /// 规则归一化，因此表单与数据库不可能对「留空」有不同理解。
+  late final TextEditingController _groupController;
   late int _osType;
   String? _selectedCredentialId;
   bool _isTesting = false;
@@ -55,6 +63,15 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
   /// 未经改动的新建表单自认为已被修改，并弹出「丢弃更改」的唠叨提示。
   late final int _defaultPort;
 
+  /// Group names already in use, offered as one-tap chips.
+  /// 已在使用的分组名，做成一点即填的标签。
+  ///
+  /// Read from the live host list so a group created on another screen is
+  /// offered here without reopening the form.
+  /// 取自实时主机列表，因此在别的界面新建的分组无需重开表单即可出现在这里。
+  List<String> get _existingGroups =>
+      existingGroupNames(ref.watch(hostListProvider).value ?? const []);
+
   bool get _isEditing => widget.existingHost != null;
   bool get _hasChanges {
     final h = widget.existingHost;
@@ -68,12 +85,19 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
           // 端口不是 22，任何新建表单一打开就会被判定为已修改。
           _portController.text.trim() != _defaultPort.toString() ||
           _osType != 0 ||
+          Host.normalizeGroupName(_groupController.text) != null ||
           _selectedCredentialId != null;
     }
     return _aliasController.text.trim() != h.alias ||
         _ipController.text.trim() != h.ipAddress ||
         _portController.text.trim() != h.port.toString() ||
         _osType != h.osType ||
+        // Compared through the model's normalizer, not against the raw text: a
+        // user who types a space into an otherwise untouched form has not
+        // modified anything, and should not be asked to confirm discarding it.
+        // 经由模型的归一化比较，而不是原始文本：用户在一个未改动过的表单里敲了个空格，
+        // 并没有修改任何东西，不该被要求确认丢弃。
+        Host.normalizeGroupName(_groupController.text) != h.groupName ||
         _selectedCredentialId != h.credentialId;
   }
 
@@ -88,6 +112,7 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
     _portController = TextEditingController(
       text: (h?.port ?? _defaultPort).toString(),
     );
+    _groupController = TextEditingController(text: h?.groupName ?? '');
     _osType = h?.osType ?? 0;
     _selectedCredentialId = h?.credentialId;
   }
@@ -97,6 +122,7 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
     _aliasController.dispose();
     _ipController.dispose();
     _portController.dispose();
+    _groupController.dispose();
     super.dispose();
   }
 
@@ -244,6 +270,7 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
       credentialName: matched?.name,
       credentialUsername: matched?.username,
       osType: _osType,
+      groupName: Host.normalizeGroupName(_groupController.text),
       isOnline: widget.existingHost?.isOnline ?? false,
     );
 
@@ -493,6 +520,37 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
                   );
                 },
               ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _groupController,
+                style: TextStyle(color: cs.onSurface),
+                decoration: _inputDecoration(
+                  t('host_group'),
+                  hint: t('host_group_hint'),
+                ),
+              ),
+              // Existing groups as one-tap chips. Retyping a name is how one
+              // group quietly becomes two: "prod" and "prod " are the same
+              // intent and different strings, and only one of them lands in the
+              // group the user meant.
+              // 已有分组做成一点即填的标签。重新输入一个名字，正是分组悄悄变成两个的
+              // 方式：「prod」与「prod 」是同一意图、不同字符串，而只有其中一个会落进
+              // 用户想要的那个分组。
+              if (_existingGroups.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final name in _existingGroups)
+                      ActionChip(
+                        label: Text(name),
+                        onPressed: () =>
+                            setState(() => _groupController.text = name),
+                      ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 24),
               _ActionBar(
                 isTesting: _isTesting,

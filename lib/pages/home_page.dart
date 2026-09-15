@@ -8,15 +8,24 @@ import '../providers/providers.dart';
 import '../providers/ssh_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
-import '../widgets/host_card.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
 import 'host_console_page.dart';
 import 'add_host_page.dart';
+import 'hosts/host_list_model.dart';
+import 'hosts/host_list_view.dart';
+import 'hosts/host_search_field.dart';
 
 /// Home screen showing the host list, split by the three states a host can be
-/// in: online, unverified, offline.
-/// 显示主机列表的主页，按主机可能处于的三种状态分组：在线、待验证、离线。
+/// in: online, unverified, offline, and — inside each of those — by group.
+/// 显示主机列表的主页，按主机可能处于的三种状态分组：在线、待验证、离线；每组内部
+/// 再按分组切分。
+///
+/// Search and grouping compose inside that three-state split rather than over
+/// it; the reasoning is written out at [buildHostSections], next to the rule
+/// itself.
+/// 搜索与分组是在三态切分**之内**组合，而不是压在它之上；理由写在
+/// [buildHostSections] 旁边，与规则本身放在一起。
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -45,8 +54,30 @@ class _HomePageState extends ConsumerState<HomePage> {
   Set<String> _lastProbedHostIds = const <String>{};
   DateTime? _lastExitAttemptAt;
 
+  /// Text currently in the search field. Owned by the page, so the field's
+  /// clear button and the filtering below can never disagree about what is
+  /// being searched for.
+  /// 搜索框中的文字。由页面持有，因此清除按钮与下面的过滤逻辑对「在搜什么」永远不会
+  /// 各执一词。
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // A listener rather than `onChanged`, so a clear through the field's own
+    // button rebuilds the list exactly like typing does.
+    // 使用监听器而非 `onChanged`，使通过输入框自身按钮的清除与手动输入一样触发重建。
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   @override
   void dispose() {
+    _searchController.dispose();
     _probingHosts.clear();
     super.dispose();
   }
@@ -292,7 +323,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     // 「未知」不是「宕机」：主题的错误色会断言一次并无依据的故障，因此待验证的
     // 主机使用柔和、不刺眼的色调。取自卡片所用的同一个辅助函数，分组标题、说明与
     // 其下的卡片才不会各走各的。
-    final unverifiedColor = hostStatusColor(cs, HostStatus.unverified);
     final hostAsync = ref.watch(hostListProvider);
 
     return PopScope(
@@ -317,12 +347,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           actions: [
             IconButton(
               icon: Icon(Icons.add, color: cs.secondary),
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AddHostPage()),
-                );
-              },
+              onPressed: () => _openAddHost(context),
             ),
           ],
         ),
@@ -337,79 +362,42 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
           data: (hosts) {
             _scheduleStatusProbe(hosts);
-            // Three groups, because `HostStatus` has three values: folding
-            // "unverified" in with either neighbour is exactly the conflation
-            // the old boolean forced on this page.
-            // 三个分组，因为 `HostStatus` 有三个取值：把「待验证」并入任何一侧，
-            // 正是旧布尔字段强加给本页的混淆。
-            final online = hosts
-                .where((h) => h.status == HostStatus.online)
-                .toList();
-            final unverified = hosts
-                .where((h) => h.status == HostStatus.unverified)
-                .toList();
-            final offline = hosts
-                .where((h) => h.status == HostStatus.offline)
-                .toList();
+            final query = _searchController.text;
+            final sections = buildHostSections(hosts, query);
 
-            return RefreshIndicator(
-              color: cs.primary,
-              onRefresh: () async {
-                ref.invalidate(hostListProvider);
-                await ref.read(hostListProvider.future);
-              },
-              child: ListView(
-                padding: const EdgeInsets.only(top: 12, bottom: 32),
-                children: [
-                  _buildOverview(
-                    context,
-                    hosts,
-                    online.length,
-                    unverified.length,
-                    offline.length,
+            // The search field sits outside the scroll view on purpose: the
+            // whole point of searching is that the list is long, and a field
+            // that scrolls away is one the user has to scroll back to before
+            // they can correct a typo.
+            // 搜索框刻意放在滚动视图之外：搜索存在的理由正是列表很长，而一个会滚走的
+            // 输入框意味着用户必须滚回去才能改一个错字。
+            return Column(
+              children: [
+                if (shouldOfferSearch(hostCount: hosts.length, query: query))
+                  HostSearchField(controller: _searchController),
+                Expanded(
+                  child: RefreshIndicator(
+                    color: cs.primary,
+                    onRefresh: () async {
+                      ref.invalidate(hostListProvider);
+                      await ref.read(hostListProvider.future);
+                    },
+                    // The overview card, the section headers and the group
+                    // headers all live inside the list, from the same
+                    // `sections`, so their numbers cannot disagree.
+                    // 摘要卡、分区标题与分组标题都在列表内部，且同出一份 `sections`，
+                    // 因此它们的数字不可能互相矛盾。
+                    child: HostListView(
+                      sections: sections,
+                      hasQuery: query.trim().isNotEmpty,
+                      onAddHost: () => _openAddHost(context),
+                      onOpenHost: (host) => _navigateToConsole(context, host),
+                      onHostOptions: (host) =>
+                          _showHostOptions(context, ref, host),
+                    ),
                   ),
-                  if (online.isNotEmpty) ...[
-                    AppSectionHeader(
-                      title: t('online_hosts'),
-                      trailing: '${online.length}',
-                      color: cs.primary,
-                    ),
-                    ...online.map(_buildHostCard),
-                  ],
-                  // Unverified hosts get their own section between the two.
-                  // They are neither usable-as-confirmed nor known to be down:
-                  // filing them under "Offline" would state an outage nobody
-                  // measured, which is how a user learns that a red section
-                  // means nothing — and then misses the one that does.
-                  // Their group is also the one the user can act on: opening
-                  // the host is what turns it into online or offline.
-                  // 待验证的主机在两个分组之间单列。它们既不是「可用且已确认」，
-                  // 也不是「确知宕机」：归入「离线」等于宣称一次无人测量过的故障，
-                  // 那正是用户学会「红色分组不代表什么」的途径，之后连有意义的那次
-                  // 也会被忽略。这个分组也恰恰是用户可以行动的一组：打开主机即可让
-                  // 它变成在线或离线。
-                  if (unverified.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    AppSectionHeader(
-                      title: t('host_status_unverified'),
-                      trailing: '${unverified.length}',
-                      color: unverifiedColor,
-                    ),
-                    _UnverifiedNote(color: unverifiedColor),
-                    ...unverified.map(_buildHostCard),
-                  ],
-                  if (offline.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    AppSectionHeader(
-                      title: t('offline_hosts'),
-                      trailing: '${offline.length}',
-                      color: cs.error,
-                    ),
-                    ...offline.map(_buildHostCard),
-                  ],
-                  if (hosts.isEmpty) _buildEmptyState(context, cs),
-                ],
-              ),
+                ),
+              ],
             );
           },
         ),
@@ -417,104 +405,23 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  /// Opens the add-host form.
+  /// 打开新增主机表单。
+  ///
+  /// Named rather than inlined at the app bar because the empty state offers the
+  /// same action, and two call sites spelling the route out separately is how
+  /// one of them ends up pointing somewhere else.
+  /// 单独成方法而不是写在应用栏里，是因为空状态提供的是同一个动作；两处各写一遍路由，
+  /// 正是其中一处最终指向别处的原因。
+  Future<void> _openAddHost(BuildContext context) {
+    return Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddHostPage()),
+    );
+  }
+
   /// Builds the card for [host], wiring up the interactions the list offers.
   /// 构建 [host] 的卡片，接上列表提供的各项交互。
-  Widget _buildHostCard(Host host) => HostCard(
-    host: host,
-    onTap: () => _navigateToConsole(context, host),
-    onLongPress: () => _showHostOptions(context, ref, host),
-    onMore: () => _showHostOptions(context, ref, host),
-  );
-
-  Widget _buildOverview(
-    BuildContext context,
-    List<Host> hosts,
-    int onlineCount,
-    int unverifiedCount,
-    int offlineCount,
-  ) {
-    final cs = Theme.of(context).colorScheme;
-    final total = hosts.length;
-    // Two rows of two, not one row of four. All three states plus the total have
-    // to be readable at once, and at 360dp a four-across row squeezes each
-    // label to roughly two thirds of what "Unverified" or "Не подтверждён"
-    // needs — they would ellipsise, and a summary that hides its labels is not
-    // a summary. The counts must also visibly add up: a total that does not
-    // equal its parts reads as a broken screen, which is exactly what the
-    // three-item version did whenever a host was unverified, i.e. on every
-    // first launch.
-    // 两行两列而不是一行四个。三种状态加总数必须同时可读：在 360dp 上排成一行会把每个
-    // 标签压到 "Unverified" 或 "Не подтверждён" 所需宽度的约三分之二，它们会被省略号
-    // 截断，而藏起标签的摘要就不成其为摘要。数字还必须一眼看得出能对上：总数与各部分不等
-    // 的摘要卡看起来就是坏掉的，而这正是三格版本在有主机未验证时的表现——也就是每次首次
-    // 启动都会如此。
-    //
-    // Labels and colours come from the same helpers the host cards use, so the
-    // header and the rows below it cannot drift apart.
-    // 文案与配色取自主机卡片所用的同一组 helper，因此顶部摘要与下方列表不会各说各话。
-    return AppCard(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              _OverviewItem(
-                label: t('total'),
-                value: '$total',
-                color: cs.secondary,
-                icon: Icons.dns_outlined,
-              ),
-              _OverviewDivider(),
-              _OverviewItem(
-                label: hostStatusLabel(HostStatus.online),
-                value: '$onlineCount',
-                color: hostStatusColor(cs, HostStatus.online),
-                icon: Icons.check_circle_outline,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _OverviewItem(
-                label: hostStatusLabel(HostStatus.unverified),
-                value: '$unverifiedCount',
-                color: hostStatusColor(cs, HostStatus.unverified),
-                icon: Icons.help_outline,
-              ),
-              _OverviewDivider(),
-              _OverviewItem(
-                label: hostStatusLabel(HostStatus.offline),
-                value: '$offlineCount',
-                color: hostStatusColor(cs, HostStatus.offline),
-                icon: Icons.link_off,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState(BuildContext context, ColorScheme cs) {
-    return SizedBox(
-      height: 360,
-      child: AppEmptyState(
-        icon: Icons.dns_outlined,
-        title: t('empty_hosts'),
-        message: t('empty_hosts_hint'),
-        actionLabel: t('add_host'),
-        color: cs.primary,
-        onAction: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AddHostPage()),
-          );
-        },
-      ),
-    );
-  }
 
   void _navigateToConsole(BuildContext context, Host host) {
     Navigator.push(
@@ -671,84 +578,3 @@ class _HostActionRow extends StatelessWidget {
 /// state reads as "we have not checked this host yet" rather than as a failure.
 /// 「待验证」分组标题下的一行说明，让该状态读起来是「我们还没核对过这台主机」
 /// 而不是一次故障。
-class _UnverifiedNote extends StatelessWidget {
-  /// Colour matching the section header and the cards below it.
-  /// 与该分组标题及其下卡片一致的颜色。
-  final Color color;
-
-  const _UnverifiedNote({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-      child: Text(
-        t('host_status_unverified_hint'),
-        style: TextStyle(color: color, fontSize: 11.5, height: 1.35),
-      ),
-    );
-  }
-}
-
-class _OverviewItem extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final IconData icon;
-
-  const _OverviewItem({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Expanded(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.46),
-                  fontSize: 10,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 32,
-      color: Theme.of(context).dividerColor,
-    );
-  }
-}

@@ -394,4 +394,9 @@ const Map<String, String> zhStrings = <String, String>{
   'known_hosts_forget': '删除记录',
   'known_hosts_forget_confirm': '删除 {0} 的密钥记录？\n下次连接该主机时将重新询问。',
   'known_hosts_trusted_at': '接受于',
+  'host_group': '分组',
+  'host_group_hint': '留空则不分组',
+  'host_group_none': '未分组',
+  'search_hosts': '搜索主机名、地址或用户名',
+  'no_search_results': '没有匹配的主机',
 };

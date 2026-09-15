@@ -417,4 +417,9 @@ const Map<String, String> esStrings = <String, String>{
   'known_hosts_forget_confirm':
       '¿Olvidar la clave de {0}?\nLa próxima conexión volverá a preguntar.',
   'known_hosts_trusted_at': 'Aceptada el',
+  'host_group': 'Grupo',
+  'host_group_hint': 'Déjelo vacío para no agrupar',
+  'host_group_none': 'Sin grupo',
+  'search_hosts': 'Buscar nombre, dirección o usuario',
+  'no_search_results': 'Ningún host coincide',
 };

@@ -421,4 +421,9 @@ const Map<String, String> frStrings = <String, String>{
   'known_hosts_forget_confirm':
       'Oublier la clé de {0} ?\nLa prochaine connexion redemandera.',
   'known_hosts_trusted_at': 'Acceptée le',
+  'host_group': 'Groupe',
+  'host_group_hint': 'Laisser vide pour aucun groupe',
+  'host_group_none': 'Sans groupe',
+  'search_hosts': 'Rechercher un nom, une adresse ou un utilisateur',
+  'no_search_results': 'Aucun hôte correspondant',
 };

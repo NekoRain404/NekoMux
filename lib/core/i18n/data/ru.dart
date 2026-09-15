@@ -417,4 +417,9 @@ const Map<String, String> ruStrings = <String, String>{
   'known_hosts_forget_confirm':
       'Удалить запись ключа для {0}?\nСледующее подключение запросит подтверждение снова.',
   'known_hosts_trusted_at': 'Принят',
+  'host_group': 'Группа',
+  'host_group_hint': 'Оставьте пустым, чтобы без группы',
+  'host_group_none': 'Без группы',
+  'search_hosts': 'Поиск по имени, адресу или пользователю',
+  'no_search_results': 'Нет подходящих хостов',
 };

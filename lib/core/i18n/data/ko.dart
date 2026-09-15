@@ -399,4 +399,9 @@ const Map<String, String> koStrings = <String, String>{
   'known_hosts_forget': '기록 삭제',
   'known_hosts_forget_confirm': '{0}의 키 기록을 삭제할까요?\n다음 연결 시 다시 확인합니다.',
   'known_hosts_trusted_at': '수락 시각',
+  'host_group': '그룹',
+  'host_group_hint': '비워 두면 그룹 없음',
+  'host_group_none': '그룹 없음',
+  'search_hosts': '이름, 주소 또는 사용자 이름 검색',
+  'no_search_results': '일치하는 호스트가 없습니다',
 };
