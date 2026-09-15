@@ -546,6 +546,20 @@
     </p>
   </div>
 
+  <!-- ══════════════════ 修复进度 ══════════════════ -->
+  <section class="panel">
+    <h2>修复进度</h2>
+    <p class="note">
+      本页记录的 54 条缺陷中，<b>52 条已修复并提交</b>，全部经 <code>flutter analyze</code>（无问题）与 <code>flutter test</code>（<b>300 条</b>，审计前为 0 条）验证。每条修复都带「先写失败测试、观察它确实失败、再修」的证据。
+    </p>
+    <ul>
+      <li><b>两条未修。</b> <code>eng-3</code>（<code>termux-app/</code> 那份 9.7MB、未被任何构建引用的克隆）删除与否需要产品决策，不是技术问题；<code>eng-5</code>（字体在运行时从 Google Fonts 拉取）需要把字体子集打进 assets，是一块独立工作而非缺陷修补。</li>
+      <li><b>一条故意只做了一半。</b> <code>eng-7</code> 的「删除凭据前告知将影响多少台主机」已完成；但启用外键强制（<code>PRAGMA foreign_keys=ON</code>）被<b>有意推迟</b>——在没有配套提示之前，那只会把「静默产生孤儿主机」换成「删除直接失败」，是更糟的体验。现在提示已就位，可以观察一段时间再决定。</li>
+      <li><b>顺带修掉的、报告里没有的：</b> <code>count 0</code> 被当作合理读数（<code>parseFree</code> 对不可读输出返回全零，换算成看起来正常的 0.0%）；<code>host_unreachable</code> 对真实的 DNS 失败永远匹配不上（<code>dart:io</code> 实际输出 <code>Failed host lookup</code>，而旧代码的匹配串里没有它）；列表类命令丢弃退出码，失败时渲染成空列表而非报错；以及两处会留下「无人能关闭的已认证会话」的在途连接泄漏。</li>
+      <li><b>结构性成果：</b>全部源文件 ≤ 800 行（<code>strings.dart</code> 3530→272、<code>sftp_page</code> 1182→630、<code>container_shell</code> 1048→567、<code>settings_page</code> 1044→371、<code>host_console</code> 870→517）；项目首次纳入版本控制，修复全程在 <code>fix/audit-remediation</code> 分支上可逐条回退。</li>
+    </ul>
+  </section>
+
   <div class="toolbar">
     <div class="toolbar-inner">
       <label class="search">
