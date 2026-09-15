@@ -8,9 +8,10 @@ import 'package:xterm/xterm.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
-import '../services/host_key_verifier.dart';
+import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
+import '../widgets/host_key_prompt.dart';
 import '../widgets/quick_key_bar.dart';
 import 'snippet_injection_dialog.dart';
 import 'snippet_list_page.dart';
@@ -82,6 +83,7 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
     );
 
     _terminal.onOutput = _onTerminalOutput;
+    _terminal.onResize = _onTerminalResize;
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _connect());
   }
@@ -106,15 +108,33 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
       return;
     }
 
+    // Verify the host key against the persisted known-hosts list. The previous
+    // in-memory cache was keyed by fingerprint alone and forgot everything on
+    // restart, so it could never notice that a *known* host's key had changed —
+    // the one signal that actually indicates an interception.
+    // 主机密钥对照持久化的 known_hosts 记录校验。此前的内存缓存只以指纹为键、
+    // 重启即忘，因此永远无法发现**已知主机**的密钥变了——而那正是唯一能说明
+    // 连接可能被劫持的信号。
+    final db = await ref.read(databaseProvider.future);
     _connection = SshConnection(
       host: host,
       credential: cred,
-      onHostKeyVerify: (fingerprint) async {
-        if (HostKeyVerifier.isAccepted(fingerprint)) return true;
-        final accepted = await _showHostKeyDialog(fingerprint);
-        if (accepted) HostKeyVerifier.accept(fingerprint);
-        return accepted;
-      },
+      onHostKeyVerify: buildHostKeyVerifier(
+        db: db,
+        address: host.ipAddress,
+        port: host.port,
+        onPrompt: (fingerprint, verdict) async {
+          // Runs after several awaits, so the page may already be gone; with
+          // nobody left to ask, refusing is the only safe answer.
+          // 该回调在多次 await 之后执行，页面可能已经销毁；此时无人可问，拒绝是唯一安全答案。
+          if (!mounted) return false;
+          return showHostKeyPrompt(
+            context,
+            fingerprint: fingerprint,
+            verdict: verdict,
+          );
+        },
+      ),
     );
     _outputSub?.cancel();
     _stateSub?.cancel();
@@ -135,9 +155,38 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
           _showReconnectOverlay = true;
         }
       });
+      // The PTY is created at a fixed 120x40, so it has to be told the real
+      // on-screen size once the session exists. [onResize] will not fire for
+      // this: the terminal has not changed size since it was laid out, so no
+      // layout change is coming to carry the size across.
+      // PTY 以固定的 120x40 创建，因此会话建立后必须把屏幕上的真实尺寸告诉它。
+      // 这件事不会由 [onResize] 触发：终端自布局以来尺寸未变，不会有布局变化
+      // 把尺寸带过去。
+      if (state == SshConnectionState.connected) {
+        _connection?.resizeTerminal(_terminal.viewWidth, _terminal.viewHeight);
+      }
     });
 
     await _connection!.connect();
+  }
+
+  /// Keeps the remote PTY in step with the on-screen terminal.
+  /// 让远端 PTY 与屏幕上的终端保持一致。
+  ///
+  /// The PTY is created once at a fixed 120x40. On a phone the terminal is
+  /// roughly 40-60 columns, so without this the remote shell believes it has
+  /// 120 columns: output wraps at the wrong place and full-screen programs
+  /// (htop, vim, less) render corrupted.
+  /// PTY 以固定的 120x40 创建一次。手机上的终端大约 40–60 列，因此没有这一步时，
+  /// 远端 shell 会以为自己有 120 列：输出在错误的位置换行，htop、vim、less 等
+  /// 全屏程序渲染错乱。
+  void _onTerminalResize(
+    int width,
+    int height,
+    int pixelWidth,
+    int pixelHeight,
+  ) {
+    _connection?.resizeTerminal(width, height);
   }
 
   void _onTerminalOutput(String data) {
@@ -412,77 +461,6 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
 
     _disconnect();
     Navigator.pop(context);
-  }
-
-  Future<bool> _showHostKeyDialog(String fingerprint) async {
-    final cs = Theme.of(context).colorScheme;
-    final dividerColor = Theme.of(context).dividerColor;
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: cs.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        title: Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: cs.secondary, size: 28),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                t('host_key_verify'),
-                style: TextStyle(
-                  color: cs.onSurface,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              t('cannot_verify_host_key'),
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.6),
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).scaffoldBackgroundColor,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: dividerColor, width: 0.5),
-              ),
-              child: SelectableText(
-                fingerprint,
-                style: TextStyle(
-                  color: cs.primary,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(t('reject'), style: TextStyle(color: cs.error)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(t('accept'), style: TextStyle(color: cs.primary)),
-          ),
-        ],
-      ),
-    );
-    return result ?? false;
   }
 
   void _onQuickKey(String label, String sequence) {
