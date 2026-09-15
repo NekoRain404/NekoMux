@@ -33,11 +33,7 @@ class CommandResult {
   /// 详见 [ok]。
   final int? exitCode;
 
-  const CommandResult({
-    required this.stdout,
-    this.stderr = '',
-    this.exitCode,
-  });
+  const CommandResult({required this.stdout, this.stderr = '', this.exitCode});
 
   /// Whether the remote command reported success.
   /// 远端命令是否上报了成功。

@@ -83,11 +83,13 @@ void main() {
       expect(result.combined, 'out\n\nerr\n');
     });
 
-    test('the separator is exactly one newline, not the join of the pieces',
-        () {
-      const result = CommandResult(stdout: 'a', stderr: 'b', exitCode: 2);
-      expect(result.combined, 'a\nb');
-      expect(result.combined.split('\n').length, 2);
-    });
+    test(
+      'the separator is exactly one newline, not the join of the pieces',
+      () {
+        const result = CommandResult(stdout: 'a', stderr: 'b', exitCode: 2);
+        expect(result.combined, 'a\nb');
+        expect(result.combined.split('\n').length, 2);
+      },
+    );
   });
 }

@@ -10,6 +10,7 @@ import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
+import 'console/ssh_error_text.dart';
 import 'containers/remote_action_outcome.dart';
 
 class SystemdPage extends ConsumerStatefulWidget {
@@ -106,16 +107,59 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
         if (_conn!.state != SshConnectionState.connected) {
           setState(() {
             _loading = false;
-            _error = _conn!.lastError ?? t('connection_failed');
+            // The reason, in the user's own language: the connection reports a
+            // code (`SshConnection.failure`) and the service no longer writes
+            // the sentence itself.
+            // 用用户自己的语言给出原因：连接上报的是编码（`SshConnection.failure`），
+            // 句子不再由服务书写。
+            _error = sshConnectErrorText(_conn!);
           });
           return;
         }
       }
-      final out = await MonitoringService.exec(
-        _conn!,
+      final result = await _conn!.runCommand(
         'systemctl list-units --type=service --all --no-pager --no-legend',
       );
-      final svcs = MonitoringService.parseSystemctl(out);
+      // A listing that failed must say so instead of rendering an empty list,
+      // which used to be indistinguishable from "no services" — the defect
+      // already fixed for `docker ps`. A host whose init is not systemd answers
+      // this command with an error, and that answer is the one the user needs,
+      // not an empty page.
+      // 失败的列表命令必须说明原因，而不是渲染一个空列表——过去它与「没有服务」无法
+      // 区分，正是已在 `docker ps` 上修复过的缺陷。init 不是 systemd 的主机对该命令
+      // 返回的是错误，而那个错误正是用户需要看到的，不是空页面。
+      //
+      // `ok` means an exit status of exactly 0 and nothing else: a status the
+      // server never reported is *unknown*, not success (see CommandResult.ok),
+      // and for a listing whose whole answer is the row set, an unconfirmed read
+      // must not be shown as "no services". The container listing tolerates a
+      // missing status because it has rows to fall back on; this one does not.
+      // `ok` 仅指退出状态恰为 0：服务端从未上报的状态是**未知**而非成功
+      // （见 CommandResult.ok）；对一个答案就是整份行集的列表来说，未经确认的读取不得
+      // 当作「没有服务」展示。容器列表容忍状态缺失，因为它有行可依；这里没有。
+      //
+      // An exit status of 0 with no rows is *not* a failure: the remote said it
+      // succeeded and listed nothing — `--all` can legitimately report no unit
+      // on an unusual host — and inventing a failure out of the shape of the
+      // output is the very heuristic this codebase removed.
+      // 退出状态为 0 却没有行**不算**失败：远端说它成功了、什么也没列出——在少见的主机
+      // 上 `--all` 合法地可能报不出任何单元；凭输出的形态编造失败，正是本代码库已经移除
+      // 的那套启发式。
+      if (!result.ok) {
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = '${t('list_failed')}: ${remoteFailureText(result)}';
+          });
+        }
+        return;
+      }
+      // Parsed from `combined`: the exact bytes the old `executeCommand`-based
+      // path handed the parser. This change adds the exit-status check; it does
+      // not alter what the parser sees.
+      // 解析输入为 `combined`：与旧的基于 `executeCommand` 的路径交给解析器的字节完全
+      // 一致。本次改动增加的是退出状态判断，没有改变解析器看到的内容。
+      final svcs = MonitoringService.parseSystemctl(result.combined);
       if (mounted) {
         setState(() {
           _services = svcs;
@@ -127,7 +171,10 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = e.toString();
+          // A command that failed because the session went away is translated;
+          // anything else keeps its own technical text.
+          // 因会话消失而失败的命令会被翻译；其它错误保留其技术文本。
+          _error = sshCaughtErrorText(e);
         });
       }
     }
@@ -214,7 +261,14 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
       // 该单元。
       await _load();
     } catch (e) {
-      if (mounted) _snack(_failureMessage(actionLabel, e.toString()), cs.error);
+      // "SSH not connected" is the common one here — the session can go away
+      // while this page is open — so it is translated like every other
+      // connection failure rather than printed as a code.
+      // 这里最常见的是「SSH 未连接」——本页打开期间会话可能消失——因此它像其它连接
+      // 失败一样被翻译，而不是打印成编码。
+      if (mounted) {
+        _snack(_failureMessage(actionLabel, sshCaughtErrorText(e)), cs.error);
+      }
     }
   }
 

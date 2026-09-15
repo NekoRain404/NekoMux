@@ -64,14 +64,17 @@ void main() {
   });
 
   group('hostKeyFor', () {
-    test('combines address and port so two ports on one host stay separate', () {
-      expect(hostKeyFor('10.0.0.5', 22), '10.0.0.5:22');
-      expect(hostKeyFor('10.0.0.5', 2222), '10.0.0.5:2222');
-      expect(
-        hostKeyFor('10.0.0.5', 22),
-        isNot(equals(hostKeyFor('10.0.0.5', 2222))),
-      );
-    });
+    test(
+      'combines address and port so two ports on one host stay separate',
+      () {
+        expect(hostKeyFor('10.0.0.5', 22), '10.0.0.5:22');
+        expect(hostKeyFor('10.0.0.5', 2222), '10.0.0.5:2222');
+        expect(
+          hostKeyFor('10.0.0.5', 22),
+          isNot(equals(hostKeyFor('10.0.0.5', 2222))),
+        );
+      },
+    );
 
     test('handles IPv6 literals without losing the port', () {
       final key = hostKeyFor('fe80::1', 22);

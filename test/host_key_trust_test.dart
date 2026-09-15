@@ -44,8 +44,9 @@ class _FakeKnownHostsDb implements Database {
   }
 
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError('${invocation.memberName} is not used by this test');
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
+    '${invocation.memberName} is not used by this test',
+  );
 }
 
 void main() {
@@ -104,28 +105,31 @@ void main() {
     expect(db.rows, isEmpty, reason: 'a rejected key must never be stored');
   });
 
-  test('a CHANGED key is surfaced as changed, not as a first contact', () async {
-    db.rows['10.0.0.5:22'] = fingerprint;
+  test(
+    'a CHANGED key is surfaced as changed, not as a first contact',
+    () async {
+      db.rows['10.0.0.5:22'] = fingerprint;
 
-    final accepted = await verifierFor((_, v) async {
-      prompts.add(v);
-      return false;
-    })(otherFingerprint);
+      final accepted = await verifierFor((_, v) async {
+        prompts.add(v);
+        return false;
+      })(otherFingerprint);
 
-    expect(accepted, isFalse);
-    expect(
-      prompts,
-      [HostKeyVerdict.changed],
-      reason:
-          'reusing the first-contact prompt here would hide the only signal '
-          'that the connection may be intercepted',
-    );
-    expect(
-      db.rows['10.0.0.5:22'],
-      fingerprint,
-      reason: 'rejecting must leave the original record intact',
-    );
-  });
+      expect(accepted, isFalse);
+      expect(
+        prompts,
+        [HostKeyVerdict.changed],
+        reason:
+            'reusing the first-contact prompt here would hide the only signal '
+            'that the connection may be intercepted',
+      );
+      expect(
+        db.rows['10.0.0.5:22'],
+        fingerprint,
+        reason: 'rejecting must leave the original record intact',
+      );
+    },
+  );
 
   test('accepting a changed key replaces the stored one', () async {
     db.rows['10.0.0.5:22'] = fingerprint;

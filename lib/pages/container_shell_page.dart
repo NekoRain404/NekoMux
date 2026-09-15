@@ -11,6 +11,7 @@ import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
+import 'console/ssh_error_text.dart';
 import 'containers/container_action_sheet.dart';
 import 'containers/container_cards.dart';
 import 'containers/container_log_dialog.dart';
@@ -129,7 +130,12 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
         if (mounted) {
           setState(() {
             _isLoading = false;
-            _error = _ssh!.lastError ?? t('conn_failed');
+            // Classified, then translated — see ssh_error_text.dart. The raw
+            // `lastError` is English transport text and would leave every
+            // non-English user without a diagnosis.
+            // 先分类再翻译——见 ssh_error_text.dart。原始的 `lastError` 是英文
+            // 传输层文本，会让所有非英语用户读不到诊断信息。
+            _error = sshConnectErrorText(_ssh!);
           });
         }
         return;

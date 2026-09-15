@@ -19,6 +19,7 @@ import 'console/monitor_samples.dart';
 import 'console/probe_command.dart';
 import 'console/resource_monitor_card.dart';
 import 'console/resource_probe.dart';
+import 'console/ssh_error_text.dart';
 
 /// Host detail console with real-time resource monitoring.
 /// 主机详情控制台，带实时资源监控。
@@ -224,7 +225,18 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
       if (!_isCurrentAttempt(attempt)) return;
 
       if (conn.state != SshConnectionState.connected) {
-        _stopMonitoring(conn.lastError ?? t('cannot_connect_fallback'));
+        // The reason, in the user's own language. The line used to show
+        // `lastError`, which was a Chinese sentence whatever language the app
+        // was set to; the connection now reports a code
+        // (`SshConnection.failure`) and the sentence is chosen here. The slot is
+        // for the *reason* — the overlay already prints
+        // `monitor_unavailable_hint` underneath it, which is where "resource
+        // monitoring unavailable" belongs.
+        // 用用户自己的语言给出原因。此处过去展示 `lastError`，无论应用设成哪种语言它都是
+        // 一句中文；现在连接上报编码（`SshConnection.failure`），句子在这里选择。这个位置
+        // 属于**原因**——浮层已经在其下方打印 `monitor_unavailable_hint`，「资源监控不可用」
+        // 的信息属于那里。
+        _stopMonitoring(sshConnectErrorText(conn));
         return;
       }
 

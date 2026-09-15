@@ -95,36 +95,48 @@ void main() {
       final conn = newConnection();
       addTearDown(conn.dispose);
 
+      // Asserted on the code rather than on the text. The failure used to carry
+      // the Chinese sentence "SSH 未连接" as its message: every user got Chinese
+      // whatever language the app was set to, and a caller could not tell this
+      // failure from any other `Exception`. The sentence a user reads is now
+      // chosen by the presentation layer from the code (`sshFailureText`).
+      // 断言的是编码而不是文本。该失败过去把中文句子「SSH 未连接」当作消息：无论应用
+      // 设成哪种语言，所有用户看到的都是中文，调用方也无法把它与其它 `Exception` 区分
+      // 开。用户读到的句子现在由展示层根据该编码选择（`sshFailureText`）。
       await expectLater(
         conn.runCommand('true'),
         throwsA(
-          isA<Exception>().having(
-            (e) => e.toString(),
-            'message',
-            contains('SSH 未连接'),
+          isA<SshException>().having(
+            (e) => e.kind,
+            'kind',
+            SshFailure.notConnected,
           ),
         ),
       );
     });
 
-    test('executeCommand still reports the same exception when not connected',
-        () async {
-      // The legacy path and the new one share one guard, so a caller that
-      // catches the old error keeps catching it.
-      final conn = newConnection();
-      addTearDown(conn.dispose);
+    test(
+      'executeCommand still reports the same exception when not connected',
+      () async {
+        // The legacy path and the new one share one guard, so a caller that
+        // catches the old error keeps catching it — now with a code attached.
+        // 旧路径与新路径共用同一个守卫，因此捕获旧错误的调用方仍能捕获到它——只是现在
+        // 附带了编码。
+        final conn = newConnection();
+        addTearDown(conn.dispose);
 
-      await expectLater(
-        conn.executeCommand('true'),
-        throwsA(
-          isA<Exception>().having(
-            (e) => e.toString(),
-            'message',
-            contains('SSH 未连接'),
+        await expectLater(
+          conn.executeCommand('true'),
+          throwsA(
+            isA<SshException>().having(
+              (e) => e.kind,
+              'kind',
+              SshFailure.notConnected,
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
 
     test('a disposed connection is still not connected', () async {
       final conn = newConnection();
@@ -135,18 +147,20 @@ void main() {
   });
 
   group('teardown without a session', () {
-    test('disconnect and dispose are safe on a never-connected instance',
-        () async {
-      final conn = newConnection();
+    test(
+      'disconnect and dispose are safe on a never-connected instance',
+      () async {
+        final conn = newConnection();
 
-      await conn.disconnect();
-      expect(conn.state, SshConnectionState.disconnected);
-      conn.dispose();
+        await conn.disconnect();
+        expect(conn.state, SshConnectionState.disconnected);
+        conn.dispose();
 
-      // dispose() is idempotent.
-      conn.dispose();
-      expect(conn.state, SshConnectionState.disconnected);
-    });
+        // dispose() is idempotent.
+        conn.dispose();
+        expect(conn.state, SshConnectionState.disconnected);
+      },
+    );
 
     test('connect is a no-op once disposed', () async {
       final conn = newConnection();

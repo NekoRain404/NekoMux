@@ -17,6 +17,7 @@ import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
 import '../widgets/quick_key_bar.dart';
+import 'console/ssh_error_text.dart';
 import 'snippet_injection_dialog.dart';
 import 'snippet_list_page.dart';
 import 'terminal/snippets_sheet.dart';
@@ -193,7 +194,12 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
         setState(() {
           _connState = state;
           if (state == SshConnectionState.error) {
-            _connError = connection.lastError;
+            // `lastError` carries the raw transport text (English, technical).
+            // Showing it verbatim would leave every non-English user without a
+            // diagnosis, so the classified failure goes through the translator.
+            // `lastError` 携带的是原始传输层文本（英文、技术性）。直接展示会让所有
+            // 非英语用户读不到诊断信息，因此这里把分类后的失败交给翻译层。
+            _connError = sshConnectErrorText(connection);
             _showReconnectOverlay = true;
           } else if (state == SshConnectionState.disconnected &&
               _showReconnectOverlay == false) {

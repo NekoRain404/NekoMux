@@ -82,11 +82,9 @@ void main() {
 
     await notifier.setOnline('h1', true);
     await container.pump();
-    expect(
-      notifications,
-      [true],
-      reason: 'false -> true is a real transition and must notify',
-    );
+    expect(notifications, [
+      true,
+    ], reason: 'false -> true is a real transition and must notify');
 
     // Redundant writes must neither notify nor rebuild the list.
     // 冗余写入既不得通知，也不得重建列表。
@@ -102,11 +100,10 @@ void main() {
 
     await notifier.setOnline('h1', false);
     await container.pump();
-    expect(
-      notifications,
-      [true, false],
-      reason: 'true -> false is a real transition and must notify',
-    );
+    expect(notifications, [
+      true,
+      false,
+    ], reason: 'true -> false is a real transition and must notify');
 
     await notifier.setOnline('h1', false);
     await container.pump();

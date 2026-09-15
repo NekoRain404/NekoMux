@@ -49,7 +49,10 @@ const String systemctlOutputMarkedAscii = '''
 
 /// Returns the parsed service with the given unit name, or null if the parser
 /// dropped it.
-Map<String, dynamic>? _unitNamed(List<Map<String, dynamic>> services, String unit) {
+Map<String, dynamic>? _unitNamed(
+  List<Map<String, dynamic>> services,
+  String unit,
+) {
   for (final service in services) {
     if (service['unit'] == unit) return service;
   }
@@ -66,14 +69,16 @@ void main() {
       expect(MonitoringService.parseFree(freeOutputZh), [126435, 66172, 51797]);
     });
 
-    test('does not confuse the header row or the Swap row with the memory row',
-        () {
-      // Header row: first token non-numeric, following tokens are not numbers.
-      // Swap row: also all-numeric, but comes *after* the Mem row.
-      final parsed = MonitoringService.parseFree(freeOutputC);
-      expect(parsed[0], isNot(0));
-      expect(parsed, isNot([163839, 33033, 130806]));
-    });
+    test(
+      'does not confuse the header row or the Swap row with the memory row',
+      () {
+        // Header row: first token non-numeric, following tokens are not numbers.
+        // Swap row: also all-numeric, but comes *after* the Mem row.
+        final parsed = MonitoringService.parseFree(freeOutputC);
+        expect(parsed[0], isNot(0));
+        expect(parsed, isNot([163839, 33033, 130806]));
+      },
+    );
   });
 
   group('memoryUsagePercentFromFree', () {
@@ -94,25 +99,34 @@ void main() {
 
   group('parseSystemctl — SUB / DESCRIPTION column boundary', () {
     test(
-        'keeps a one-space-padded SUB out of the description (running service)',
-        () {
-      // systemd pads SUB so that the 7-character state "running" is followed
-      // by a single space before the description.
-      final service = _unitNamed(
+      'keeps a one-space-padded SUB out of the description (running service)',
+      () {
+        // systemd pads SUB so that the 7-character state "running" is followed
+        // by a single space before the description.
+        final service = _unitNamed(
           MonitoringService.parseSystemctl(systemctlOutput),
-          '1panel-agent.service');
-      expect(service, isNotNull,
-          reason: 'running service row was dropped by the parser');
-      expect(service!['load'], 'loaded');
-      expect(service['active'], 'active');
-      expect(service['sub'], 'running');
-      expect(service['description'], '1Panel, a modern open source linux panel');
-    });
+          '1panel-agent.service',
+        );
+        expect(
+          service,
+          isNotNull,
+          reason: 'running service row was dropped by the parser',
+        );
+        expect(service!['load'], 'loaded');
+        expect(service['active'], 'active');
+        expect(service['sub'], 'running');
+        expect(
+          service['description'],
+          '1Panel, a modern open source linux panel',
+        );
+      },
+    );
 
     test('still parses rows whose description is separated by two spaces', () {
       final service = _unitNamed(
-          MonitoringService.parseSystemctl(systemctlOutput),
-          'alsa-restore.service');
+        MonitoringService.parseSystemctl(systemctlOutput),
+        'alsa-restore.service',
+      );
       expect(service, isNotNull);
       expect(service!['active'], 'active');
       expect(service['sub'], 'exited');
@@ -123,33 +137,33 @@ void main() {
   group('parseSystemctl — ●-prefixed (failed / not-found) rows', () {
     test('returns marked rows instead of discarding them', () {
       final services = MonitoringService.parseSystemctl(systemctlOutputMarked);
-      expect(
-        services.map((s) => s['unit']).toList(),
-        [
-          'drkonqi-coredump-processor@1-8194-5964_25003-0.service',
-          'apparmor.service',
-        ],
-      );
+      expect(services.map((s) => s['unit']).toList(), [
+        'drkonqi-coredump-processor@1-8194-5964_25003-0.service',
+        'apparmor.service',
+      ]);
     });
 
     test('parses a marked failed unit (active == failed)', () {
       final service = _unitNamed(
-          MonitoringService.parseSystemctl(systemctlOutputMarked),
-          'drkonqi-coredump-processor@1-8194-5964_25003-0.service');
+        MonitoringService.parseSystemctl(systemctlOutputMarked),
+        'drkonqi-coredump-processor@1-8194-5964_25003-0.service',
+      );
       expect(service, isNotNull, reason: '● failed row was dropped');
       expect(service!['load'], 'loaded');
       expect(service['active'], 'failed');
       expect(service['sub'], 'failed');
-      expect(service['description'],
-          'Pass systemd-coredump journal entries to relevant user for potential DrKonqi handling');
+      expect(
+        service['description'],
+        'Pass systemd-coredump journal entries to relevant user for potential DrKonqi handling',
+      );
     });
 
-    test(
-        'parses a marked not-found unit whose LOAD/ACTIVE/SUB overflow into '
+    test('parses a marked not-found unit whose LOAD/ACTIVE/SUB overflow into '
         'single spaces', () {
       final service = _unitNamed(
-          MonitoringService.parseSystemctl(systemctlOutputMarked),
-          'apparmor.service');
+        MonitoringService.parseSystemctl(systemctlOutputMarked),
+        'apparmor.service',
+      );
       expect(service, isNotNull, reason: '● not-found row was dropped');
       expect(service!['load'], 'not-found');
       expect(service['active'], 'inactive');
@@ -158,11 +172,14 @@ void main() {
     });
 
     test('handles the ASCII * marker systemd emits under LC_ALL=C', () {
-      final services =
-          MonitoringService.parseSystemctl(systemctlOutputMarkedAscii);
+      final services = MonitoringService.parseSystemctl(
+        systemctlOutputMarkedAscii,
+      );
       expect(services.length, 2);
-      expect(services.first['unit'],
-          'drkonqi-coredump-processor@1-8194-5964_25003-0.service');
+      expect(
+        services.first['unit'],
+        'drkonqi-coredump-processor@1-8194-5964_25003-0.service',
+      );
       expect(services.first['active'], 'failed');
       expect(services.last['unit'], 'apparmor.service');
       expect(services.last['load'], 'not-found');

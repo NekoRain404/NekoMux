@@ -46,9 +46,7 @@ Future<bool> showHostKeyPrompt(
       title: Row(
         children: [
           Icon(
-            isChanged
-                ? Icons.gpp_maybe_outlined
-                : Icons.warning_amber_rounded,
+            isChanged ? Icons.gpp_maybe_outlined : Icons.warning_amber_rounded,
             color: accent,
             size: 28,
           ),

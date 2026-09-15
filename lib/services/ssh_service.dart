@@ -80,10 +80,41 @@ class SshConnection {
   /// 原始终端输出流（通常为 UTF-8 编码的文本）。
   Stream<Uint8List> get outputStream => _outputController.stream;
 
-  /// Last error message, if any.
-  /// 最近一次的错误信息（如有）。
+  /// Technical rendering of the most recent failure, if any.
+  /// 最近一次失败的技术呈现（如有）。
+  ///
+  /// Never a sentence this app wrote: it is the underlying error's own text
+  /// (`SocketException: Connection refused …, port = 22`,
+  /// `SSHHostkeyError(Hostkey verification failed)`), so it stays printable in
+  /// a log and reads the same in every language. It is what a page with no
+  /// access to the i18n table can still show; the sentence a user is meant to
+  /// read is chosen from [failure] by the presentation layer
+  /// (`pages/console/ssh_error_text.dart`).
+  /// 绝不是本应用写下的句子：它是底层错误自身的文本（……），因此既能原样写进日志，
+  /// 又在任何语言下都相同。它是无法访问 i18n 表的页面仍可展示的东西；真正给用户读的
+  /// 句子由展示层根据 [failure] 选择（`pages/console/ssh_error_text.dart`）。
+  ///
+  /// This used to hold Chinese sentences ("连接超时，请检查 IP 与防火墙设置"), which is
+  /// how an English user came to be diagnosed in Chinese; a service that writes
+  /// prose can only ever write it in one language.
+  /// 它过去存放中文句子（“连接超时，请检查 IP 与防火墙设置”），英文用户因此收到中文
+  /// 诊断；自行撰写文案的服务只能写出一种语言。
   String? _lastError;
   String? get lastError => _lastError;
+
+  /// Machine-readable reason for the most recent failure, or `null` when
+  /// nothing has failed.
+  /// 最近一次失败的机器可读原因；未发生失败时为 `null`。
+  ///
+  /// The code, not the words: pair it with `sshFailureText` (or
+  /// `sshConnectErrorText`) to get something a user can read in their own
+  /// language. Set together with [lastError] on every failure path, so
+  /// `state == error` and a non-null [failure] always agree.
+  /// 这是编码而非文字：配合 `sshFailureText`（或 `sshConnectErrorText`）即可得到用户
+  /// 所用语言的可读文案。它在每条失败路径上都与 [lastError] 一同写入，因此
+  /// `state == error` 与非空 [failure] 始终一致。
+  SshFailure? _failure;
+  SshFailure? get failure => _failure;
 
   /// Execute a single command on the remote host via a separate exec channel
   /// and report its output *and* its exit status.
@@ -118,9 +149,18 @@ class SshConnection {
   /// 消费同时避免远端发送窗口被填满，使产生大量输出的命令不会与我们互相死锁；
   /// 又因为 `join()` 在流**关闭**时完成，完全没有 stdout 的命令也照样结束，
   /// 不会去等待永远不会到来的输出。
+  ///
+  /// A connection that is not up throws [SshException] with
+  /// [SshFailure.notConnected] rather than a bare `Exception`: callers have to
+  /// be able to tell "there is no session" from everything else the transport
+  /// can throw, and the message they show comes from the i18n table
+  /// (`ssh_not_connected`), not from here.
+  /// 未连接的连接抛出携带 [SshFailure.notConnected] 的 [SshException]，而不是裸的
+  /// `Exception`：调用方必须能把「没有会话」与传输层可能抛出的其它错误区分开，而展示
+  /// 的文案来自 i18n 表（`ssh_not_connected`），不是来自这里。
   Future<CommandResult> runCommand(String command) async {
     if (_client == null || _state != SshConnectionState.connected) {
-      throw Exception('SSH 未连接');
+      throw const SshException(SshFailure.notConnected);
     }
     final session = await _client!.execute(command);
     final outputFuture = session.stdout
@@ -323,6 +363,7 @@ class SshConnection {
     final epoch = ++_connectEpoch;
     _setState(SshConnectionState.connecting);
     _lastError = null;
+    _failure = null;
 
     try {
       final socket = await SSHSocket.connect(
@@ -416,7 +457,15 @@ class SshConnection {
           }
         },
         onError: (e) {
-          _lastError = e.toString();
+          // Same pairing as a failed connect: the raw text is printable, the
+          // code is what the page turns into a sentence. A session that dies
+          // mid-flight is classified like any other transport failure; the
+          // catch-all is the honest answer when nothing matches.
+          // 与连接失败相同的成对写入：原始文本供打印，编码供页面转成句子。会话中途
+          // 断开与其它传输层失败同样归类；没有命中任何条件时，兜底编码才是诚实的答案。
+          final detail = e.toString();
+          _lastError = detail;
+          _failure = classifySshFailure(detail);
           _setState(SshConnectionState.error);
         },
         onDone: () {
@@ -445,7 +494,12 @@ class SshConnection {
       // silent rather than flipping a dead object to `error`.
       // 由我们自己的清理动作引发的失败不是连接错误：对象已作废，不要置为 error。
       if (_isAbandoned(epoch)) return;
-      _lastError = _translateError(e.toString());
+      // The detail and its code, never a sentence: the page that shows this has
+      // the i18n table, and this service does not.
+      // 写入细节与其编码，绝不写句子：展示它的页面才有 i18n 表，本服务没有。
+      final detail = e.toString();
+      _lastError = detail;
+      _failure = classifySshFailure(detail);
       _setState(SshConnectionState.error);
     }
   }
@@ -513,30 +567,154 @@ class SshConnection {
     _stateController.close();
     _outputController.close();
   }
+}
 
-  /// Translate raw error strings into user-friendly Chinese messages.
-  /// 将原始错误字符串翻译为用户友好的中文消息。
-  String _translateError(String error) {
-    final lower = error.toLowerCase();
-    if (lower.contains('timeout') || lower.contains('timed out')) {
-      return '连接超时，请检查 IP 与防火墙设置';
-    }
-    if (lower.contains('host key') || lower.contains('hostkey')) {
-      return 'Host Key 验证未通过，连接已拒绝';
-    }
-    if (lower.contains('auth') ||
-        lower.contains('password') ||
-        lower.contains('key')) {
-      return '认证失败，请检查凭据';
-    }
-    if (lower.contains('refused') || lower.contains('connection refused')) {
-      return '连接被拒绝，请检查端口与服务状态';
-    }
-    if (lower.contains('resolve') ||
-        lower.contains('unknown host') ||
-        lower.contains('no address')) {
-      return '无法解析主机地址，请检查 IP 或域名';
-    }
-    return error;
+/// What went wrong with an [SshConnection].
+/// [SshConnection] 出了什么问题。
+///
+/// A machine-readable code, not a sentence. The words a user reads come from the
+/// i18n table via `pages/console/ssh_error_text.dart`; this service used to
+/// write those words itself, in Chinese, on every failed connect — which is why
+/// an English user got a Chinese diagnosis for a failed connection.
+/// 机器可读的编码，而非句子。用户读到的文字来自 i18n 表，经由
+/// `pages/console/ssh_error_text.dart`；本服务此前自己书写这些文字，且写的是中文，
+/// 因此英文用户在连接失败时得到的是中文诊断。
+///
+/// The codes line up with the SFTP service's `SftpFailure` where the two
+/// describe the same transport failure; each service keeps its own enum because
+/// each has codes of its own (`hostKeyVerify` here, the file operations there).
+/// 在两个服务描述同一种传输层失败之处，这些编码与 SFTP 服务的 `SftpFailure` 对应；
+/// 各服务保留自己的枚举，因为各自都有对方没有的编码（此处的 `hostKeyVerify`、
+/// 那边的文件操作）。
+enum SshFailure {
+  /// There is no live session to run a command on. Comparable to
+  /// `SftpFailure.notConnected`; thrown as an [SshException], never stored on
+  /// the connection.
+  /// 没有可执行命令的活动会话。与 `SftpFailure.notConnected` 对应；以
+  /// [SshException] 抛出，不会存到连接上。
+  notConnected,
+
+  /// The connect attempt timed out.
+  /// 连接尝试超时。
+  connTimeout,
+
+  /// Authentication was rejected.
+  /// 认证被拒绝。
+  authFailed,
+
+  /// The server refused the connection.
+  /// 服务器拒绝连接。
+  connRefused,
+
+  /// The host address could not be resolved.
+  /// 主机地址无法解析。
+  hostUnreachable,
+
+  /// The server's host key was not accepted, so the connection was refused.
+  /// 服务器的主机密钥未被接受，连接因此被拒绝。
+  ///
+  /// `dartssh2` reports this as `SSHHostkeyError(Hostkey verification failed)`
+  /// when the verifier declines — including when the prompt could not be shown
+  /// because the page was already gone.
+  /// 当验证回调拒绝时，`dartssh2` 上报为
+  /// `SSHHostkeyError(Hostkey verification failed)`——包括页面已销毁、无法弹窗询问
+  /// 的情形。
+  hostKeyVerify,
+
+  /// The connection failed for a reason none of the above covers.
+  /// 连接失败，原因不属于以上任何一类。
+  connect,
+}
+
+/// Classify a raw connection failure into a code the presentation layer can turn
+/// into a sentence in the user's own language.
+/// 将原始连接失败归类为展示层可据此生成用户语言句子的编码。
+///
+/// Reading a transport error is protocol knowledge and stays here; wording it is
+/// not, and left for the i18n table.
+/// 解读传输层错误属于协议知识，留在这里；措辞不属于，交给 i18n 表。
+///
+/// The predicates and their order are the ones the message-based translation
+/// used, so a given failure keeps yielding the same code. Two of them are
+/// load-bearing: `'host key'` is tested before the broader `'key'` of the
+/// authentication branch (otherwise a rejected host key would be reported as a
+/// credential problem), and `'timed out'` is a separate spelling from
+/// `'timeout'` because that is what `Socket.connect` actually produces
+/// (`SocketException: Connection timed out, host: …, port: …`).
+/// 判断条件及其顺序与基于消息的翻译一致，因此某种失败得到的编码不变。其中两条不可
+/// 省略：`'host key'` 必须先于认证分支中更宽泛的 `'key'` 判断（否则被拒绝的主机密钥
+/// 会被报成凭据问题）；`'timed out'` 与 `'timeout'` 是两种写法，因为
+/// `Socket.connect` 实际给出的正是前者
+/// （`SocketException: Connection timed out, host: …, port: …`）。
+///
+/// One predicate is new: `'failed host lookup'` is how a mistyped address
+/// actually fails on Android and Linux, and it matches none of the older
+/// substrings — the address the user just typed is exactly the one worth naming
+/// as the suspect. Everything else, including a message this app has never
+/// seen, still comes back as a code ([SshFailure.connect]) rather than throwing
+/// or passing a raw error through.
+/// 另有一条是新增的：地址写错时在 Android 与 Linux 上实际出现的是
+/// `'failed host lookup'`，它不匹配任何一个旧子串——而用户刚输入的地址正是最值得
+/// 指出来的嫌疑对象。除此之外的一切，包括本应用从未见过的消息，也都会返回编码
+/// （[SshFailure.connect]），既不抛出，也不把原始错误原样放行。
+SshFailure classifySshFailure(String error) {
+  final lower = error.toLowerCase();
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return SshFailure.connTimeout;
   }
+  if (lower.contains('host key') || lower.contains('hostkey')) {
+    return SshFailure.hostKeyVerify;
+  }
+  if (lower.contains('auth') ||
+      lower.contains('password') ||
+      lower.contains('key')) {
+    return SshFailure.authFailed;
+  }
+  if (lower.contains('refused') || lower.contains('connection refused')) {
+    return SshFailure.connRefused;
+  }
+  if (lower.contains('resolve') ||
+      lower.contains('unknown host') ||
+      lower.contains('no address') ||
+      lower.contains('failed host lookup')) {
+    return SshFailure.hostUnreachable;
+  }
+  return SshFailure.connect;
+}
+
+/// Exception thrown by [SshConnection] operations.
+/// [SshConnection] 操作抛出的异常。
+///
+/// Carries a code and the raw detail instead of a message: prose belongs to the
+/// i18n table, and a service that composes it can only compose it in one
+/// language. Pair it with `sshErrorText` to get something a user can read.
+/// 携带编码与原始细节，而不是消息：文案属于 i18n 表，而自行组装文案的服务只能组装
+/// 出一种语言。需要给用户读的文字时，请配合 `sshErrorText` 使用。
+class SshException implements Exception {
+  /// What went wrong.
+  /// 出了什么问题。
+  final SshFailure kind;
+
+  /// The underlying error's own rendering — a socket error, a protocol status —
+  /// never a sentence this app wrote. Null when there is nothing to add, as with
+  /// [SshFailure.notConnected].
+  /// 底层错误自身的呈现——套接字错误、协议状态——绝不是本应用写下的句子。
+  /// 无可补充时为 null，例如 [SshFailure.notConnected]。
+  final String? detail;
+
+  const SshException(this.kind, [this.detail]);
+
+  /// Technical rendering of the failure: printable, never displayable.
+  /// 失败的技术呈现：可以打印，不能直接展示。
+  ///
+  /// The counterpart of [SshConnection.lastError] for a failure that is thrown
+  /// rather than stored. Deliberately not translated — anything a user reads
+  /// must go through `sshErrorText`, which is what actually respects the
+  /// language setting.
+  /// 它是「抛出而非存储」的失败对应的 [SshConnection.lastError]。有意不做翻译——
+  /// 任何给用户读的文字都必须经由 `sshErrorText`，那才是真正遵循语言设置的路径。
+  String get message => detail ?? kind.name;
+
+  @override
+  String toString() => detail == null ? kind.name : '${kind.name}: $detail';
 }

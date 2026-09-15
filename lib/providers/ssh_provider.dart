@@ -4,6 +4,7 @@ import '../core/database/app_database.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../models/credential.dart';
+import '../pages/console/ssh_error_text.dart';
 import '../services/host_key_trust.dart';
 import '../services/known_hosts_store.dart';
 import '../services/ssh_service.dart';
@@ -182,7 +183,14 @@ Future<String> testConnection({
     if (service.state == SshConnectionState.connected) {
       return 'ok';
     }
-    return service.lastError ?? '连接失败';
+    // The connection reports a code and the raw detail; the sentence the user
+    // reads is chosen from the i18n table. This used to be
+    // `lastError ?? '连接失败'`, which handed an English user a Chinese message
+    // whenever the failure was not one the old translation table recognised.
+    // 连接上报编码与原始细节，用户读到的句子从 i18n 表选择。这里过去是
+    // `lastError ?? '连接失败'`：只要失败不属于旧翻译表认识的那几类，英文用户拿到的
+    // 就是一句中文。
+    return sshConnectErrorText(service);
   } catch (e) {
     return e.toString();
   } finally {

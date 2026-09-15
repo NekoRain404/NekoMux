@@ -16,6 +16,22 @@ class MonitoringService {
   /// Uses a separate exec channel so it doesn't interfere with the persistent shell.
   /// 通过已有 SSH 连接执行命令并返回 stdout 字符串。
   /// 使用独立的 exec 通道，不会干扰持久化 shell。
+  ///
+  /// Kept for callers that only want the text, but it **discards the exit
+  /// status** ([SshConnection.executeCommand] throws it away), so a command that
+  /// failed returns whatever it managed to print — an empty string, for a
+  /// listing — and the caller cannot tell that apart from a command that
+  /// succeeded and printed nothing. A listing that has to be judged (the process
+  /// and service managers, the container page) therefore goes through
+  /// [SshConnection.runCommand] and `CommandResult.ok` instead; this method is
+  /// left in place, working, for any caller that has not been converted. Those
+  /// three pages were the only callers in this app, so it currently has none.
+  /// 为只想要文本的调用方保留，但它**丢弃退出状态**
+  /// （[SshConnection.executeCommand] 会把它扔掉）：失败的命令会返回它勉强打印出的
+  /// 内容——对列表命令而言就是空字符串——调用方无法把它与「成功但无输出」区分开。
+  /// 因此需要判断成败的列表（进程管理、服务管理、容器页）改走
+  /// [SshConnection.runCommand] 与 `CommandResult.ok`；本方法为尚未改造的调用方原样
+  /// 保留并保持可用。这三个页面是本应用内仅有的调用方，因此它目前没有调用方。
   static Future<String> exec(SshConnection conn, String cmd) async {
     return await conn.executeCommand(cmd);
   }
