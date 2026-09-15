@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/app_info.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/theme_provider.dart';
 import 'pages/add_host_page.dart';
@@ -52,7 +53,7 @@ class NekoMuxApp extends ConsumerWidget {
       // 取舍（另一种是界面继续显示旧语言直到因其它原因重建）——切换语言很少发生，
       // 且结果立即可见。
       key: ValueKey<String>('locale-$language'),
-      title: 'NekoMux',
+      title: appName,
       debugShowCheckedModeBanner: false,
       theme: theme.buildTheme(isDark: isDark),
       home: const HomePage(),

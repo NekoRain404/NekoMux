@@ -40,6 +40,29 @@ const connectionFailures = [
   SftpFailure.hostUnreachable,
 ];
 
+/// The table key each failure kind must resolve to when there is no detail.
+/// 无细节时每种失败所必须解析到的表键。
+///
+/// Stated here rather than derived from the function under test: the point of
+/// the assertion is *which* sentence a kind produces, and a test that reads the
+/// mapping out of `sftpFailureText` cannot disagree with it.
+/// 在此明确列出，而不是从被测函数推导：断言要问的正是「某种失败产生哪一句」，而从
+/// `sftpFailureText` 里读出映射的测试不可能与它不一致。
+const expectedKeys = <SftpFailure, String>{
+  SftpFailure.notConnected: 'ssh_not_connected',
+  SftpFailure.connTimeout: 'conn_timeout',
+  SftpFailure.authFailed: 'auth_failed',
+  SftpFailure.connRefused: 'conn_refused',
+  SftpFailure.hostUnreachable: 'host_unreachable',
+  SftpFailure.connect: 'connection_failed',
+  SftpFailure.list: 'list_failed',
+  SftpFailure.read: 'read_failed',
+  SftpFailure.write: 'write_failed',
+  SftpFailure.delete: 'delete_failed',
+  SftpFailure.rename: 'rename_failed',
+  SftpFailure.mkdir: 'mkdir_failed',
+};
+
 void main() {
   // The active language is global mutable state; every test here picks its own
   // and leaves the default behind.
@@ -130,10 +153,38 @@ void main() {
     });
 
     test('a missing or empty detail leaves the sentence alone', () {
+      // Compared against each kind's own sentence, looked up from the table by
+      // key. The previous version compared `sftpFailureText(kind)` with
+      // `sftpFailureText(kind, null)` — the same call twice, since `detail`
+      // defaults to null — and with `sftpFailureText(kind, '')`, which the one
+      // implementation that ignores both cannot tell apart.
+      // 逐项与该失败自己的句子比对，句子按键从表中查出。此前那条用的是
+      // `sftpFailureText(kind, null)`——由于 `detail` 默认即 null，那是同一次调用；
+      // 以及与 `sftpFailureText(kind, '')` 相比——一个把两者都忽略的实现同样能通过。
+      expect(
+        expectedKeys.keys.toSet(),
+        SftpFailure.values.toSet(),
+        reason: 'every failure kind needs a sentence pinned here',
+      );
+
       for (final kind in SftpFailure.values) {
-        expect(sftpFailureText(kind), sftpFailureText(kind, ''));
-        expect(sftpFailureText(kind), sftpFailureText(kind, null));
-        expect(sftpFailureText(kind).endsWith(': '), isFalse, reason: '$kind');
+        final label = t(expectedKeys[kind]!);
+        expect(sftpFailureText(kind), label, reason: '$kind / no detail');
+        expect(
+          sftpFailureText(kind, ''),
+          label,
+          reason: '$kind / empty detail',
+        );
+        expect(
+          sftpFailureText(kind, null),
+          label,
+          reason: '$kind / null detail',
+        );
+        expect(
+          label.contains(': '),
+          isFalse,
+          reason: 'the bare sentence for $kind must carry no separator',
+        );
       }
     });
   });

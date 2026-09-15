@@ -51,159 +51,186 @@ void showContainerActionSheet(
 
   showModalBottomSheet(
     context: context,
+    // Two things, and both are needed. `isScrollControlled` lifts the 9/16
+    // viewport cap the sheet used to be clamped to, which was shorter than this
+    // body on every small window; the scroll view below then keeps the sheet
+    // from overflowing when even the freed height is not enough. Without the
+    // pair, a landscape window laid the "Logs" row out past the bottom edge
+    // with nothing to scroll: it could not be seen, let alone tapped.
+    // 两件事，缺一不可。`isScrollControlled` 解除面板过去被钳制的 9/16 视口上限——
+    // 在每种小窗口里它都比本主体更矮；下面的滚动视图则保证即便放开后的高度仍然不够，
+    // 面板也只是滚动而不会溢出。缺少这对组合时，横向窗口会把「日志」行排到底边之外，
+    // 而又无处可滚：既看不见，更点不到。
+    isScrollControlled: true,
     backgroundColor: cs.surface,
     showDragHandle: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
     ),
     builder: (ctx) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              container.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.jetBrainsMono(
-                color: cs.onSurface,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+      child: ConstrainedBox(
+        // A scroll view needs a bounded height. Capping at 90% of the window
+        // leaves the sheet looking like a sheet, and a body taller than that
+        // scrolls inside it instead of running off the screen.
+        // 滚动视图需要有限高度。上限取窗口的 90%，面板才仍然像面板；比这更高的
+        // 主体在其中滚动，而不是冲出屏幕。
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                container.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.jetBrainsMono(
+                  color: cs.onSurface,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              container.image,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.6),
-                fontSize: 12,
+              const SizedBox(height: 4),
+              Text(
+                container.image,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: cs.onSurface.withValues(alpha: 0.6),
+                  fontSize: 12,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            /// Action buttons row. /// 操作按钮行。
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  if (!isRunning)
+              /// Action buttons row. /// 操作按钮行。
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    if (!isRunning)
+                      _ActionButton(
+                        icon: Icons.play_arrow,
+                        label: t('start'),
+                        color: cs.primary,
+                        hapticsEnabled: hapticsEnabled,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          onAction(DockerAction.start);
+                        },
+                      ),
+                    if (isRunning)
+                      _ActionButton(
+                        icon: Icons.stop,
+                        label: t('stop'),
+                        color: cs.error,
+                        hapticsEnabled: hapticsEnabled,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          onAction(DockerAction.stop);
+                        },
+                      ),
                     _ActionButton(
-                      icon: Icons.play_arrow,
-                      label: t('start'),
-                      color: cs.primary,
+                      icon: Icons.restart_alt,
+                      label: t('restart'),
+                      color: cs.secondary,
                       hapticsEnabled: hapticsEnabled,
                       onTap: () {
                         Navigator.pop(ctx);
-                        onAction(DockerAction.start);
+                        onAction(DockerAction.restart);
                       },
                     ),
-                  if (isRunning)
                     _ActionButton(
-                      icon: Icons.stop,
-                      label: t('stop'),
+                      icon: Icons.delete_outline,
+                      label: t('remove_container'),
                       color: cs.error,
                       hapticsEnabled: hapticsEnabled,
                       onTap: () {
                         Navigator.pop(ctx);
-                        onAction(DockerAction.stop);
+                        onRemove();
                       },
                     ),
-                  _ActionButton(
-                    icon: Icons.restart_alt,
-                    label: t('restart'),
-                    color: cs.secondary,
-                    hapticsEnabled: hapticsEnabled,
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      onAction(DockerAction.restart);
-                    },
-                  ),
-                  _ActionButton(
-                    icon: Icons.delete_outline,
-                    label: t('remove_container'),
-                    color: cs.error,
-                    hapticsEnabled: hapticsEnabled,
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      onRemove();
-                    },
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
 
-            Divider(height: 32, color: Theme.of(context).dividerColor),
+              Divider(height: 32, color: Theme.of(context).dividerColor),
 
-            AppCard(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              onTap: () {
-                Navigator.pop(ctx);
-                onShowLogs();
-              },
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.article_outlined,
-                    color: cs.onSurface.withValues(alpha: 0.6),
-                    size: 22,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      t('logs'),
-                      style: TextStyle(color: cs.onSurface, fontSize: 14),
+              AppCard(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onShowLogs();
+                },
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.article_outlined,
+                      color: cs.onSurface.withValues(alpha: 0.6),
+                      size: 22,
                     ),
-                  ),
-                  Icon(
-                    Icons.chevron_right,
-                    color: cs.onSurface.withValues(alpha: 0.6),
-                    size: 20,
-                  ),
-                ],
-              ),
-            ),
-
-            AppCard(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              color: cs.onSurface.withValues(alpha: 0.04),
-              borderColor: Theme.of(
-                context,
-              ).dividerColor.withValues(alpha: 0.5),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.terminal,
-                    color: cs.onSurface.withValues(alpha: 0.34),
-                    size: 22,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      t('container_shell'),
-                      style: TextStyle(
-                        color: cs.onSurface.withValues(alpha: 0.46),
-                        fontSize: 14,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        t('logs'),
+                        style: TextStyle(color: cs.onSurface, fontSize: 14),
                       ),
                     ),
-                  ),
-                  AppBadge(
-                    label: t('soon_badge'),
-                    color: cs.onSurface.withValues(alpha: 0.42),
-                  ),
-                ],
+                    Icon(
+                      Icons.chevron_right,
+                      color: cs.onSurface.withValues(alpha: 0.6),
+                      size: 20,
+                    ),
+                  ],
+                ),
               ),
-            ),
 
-            const SizedBox(height: 8),
-          ],
+              AppCard(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                color: cs.onSurface.withValues(alpha: 0.04),
+                borderColor: Theme.of(
+                  context,
+                ).dividerColor.withValues(alpha: 0.5),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.terminal,
+                      color: cs.onSurface.withValues(alpha: 0.34),
+                      size: 22,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        t('container_shell'),
+                        style: TextStyle(
+                          color: cs.onSurface.withValues(alpha: 0.46),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    AppBadge(
+                      label: t('soon_badge'),
+                      color: cs.onSurface.withValues(alpha: 0.42),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     ),

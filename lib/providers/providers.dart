@@ -69,11 +69,36 @@ class CredentialListNotifier extends AsyncNotifier<List<Credential>> {
 
   /// Delete the credential with the given [id] and refresh the list.
   /// 删除指定 [id] 的凭据并刷新列表。
+  ///
+  /// Same order, and the same reason, as [clearAll]: the secret goes first. A
+  /// row deleted before its secret leaves a secret no row points at, which
+  /// nothing would ever clean up — and when removing the secret itself fails,
+  /// the row is deliberately kept, so the credential still works and is still
+  /// listed instead of leaving that orphan behind. The deletion is retryable
+  /// exactly because nothing was half-done.
+  /// 与 [clearAll] 相同的顺序、相同的理由：先删密钥。若先删行，留下的密钥将不再被任何
+  /// 行指向，永远无人清理；而删除密钥本身失败时，这里刻意保留该行，让凭据继续可用、
+  /// 继续出现在列表里，而不是留下那样一个孤儿。删除之所以可以重试，正是因为没有被
+  /// 做一半的操作。
+  ///
+  /// The refresh sits in a `finally` because `SecureStorage` throws on failure
+  /// and nothing above catches it (see `secure_storage.dart`). With the refresh
+  /// only on the success path, that throw left the row gone from the database
+  /// while the list and every host card still rendered it — a ghost that only an
+  /// app restart cleared, and whose every retry failed in exactly the same way,
+  /// so the retry could never fix what it was retrying.
+  /// 刷新放在 `finally` 中，因为 `SecureStorage` 失败时会抛异常，且上层无人捕获
+  /// （见 `secure_storage.dart`）。若只在成功路径刷新，这个异常会让数据库中的行已经
+  /// 删除、而列表与所有主机卡片仍在显示它——一个只有重启应用才能消除的幽灵条目，且每次
+  /// 重试都以完全相同的方式失败，重试永远修不好它要修的东西。
   Future<void> deleteItem(String id) async {
     final db = await ref.read(databaseProvider.future);
-    await db.delete('tb_credentials', where: 'id = ?', whereArgs: [id]);
-    await SecureStorage.deleteCredential(id);
-    ref.invalidateSelf();
+    try {
+      await SecureStorage.deleteCredential(id);
+      await db.delete('tb_credentials', where: 'id = ?', whereArgs: [id]);
+    } finally {
+      ref.invalidateSelf();
+    }
   }
 
   /// Removes every credential and its stored secret, refreshing once.
@@ -192,10 +217,21 @@ class HostListNotifier extends AsyncNotifier<List<Host>> {
 
   /// Delete the host with the given [id] and refresh the list.
   /// 删除指定 [id] 的主机并刷新列表。
+  ///
+  /// Deliberately the same shape as `CredentialListNotifier.deleteItem`: the
+  /// refresh is in a `finally`, so a throw from the delete can never leave the
+  /// list describing a database it no longer agrees with. There is no secret to
+  /// order against here — a host row owns nothing outside this table.
+  /// 刻意与 `CredentialListNotifier.deleteItem` 保持同一形态：刷新放在 `finally` 中，
+  /// 因此删除抛出的异常绝不可能让列表继续描述一个已经对不上的数据库。这里没有需要
+  /// 排序的密钥——主机行不拥有本表之外的任何东西。
   Future<void> deleteItem(String id) async {
     final db = await ref.read(databaseProvider.future);
-    await db.delete('tb_hosts', where: 'id = ?', whereArgs: [id]);
-    ref.invalidateSelf();
+    try {
+      await db.delete('tb_hosts', where: 'id = ?', whereArgs: [id]);
+    } finally {
+      ref.invalidateSelf();
+    }
   }
 
   /// Removes every host, refreshing once. See `CredentialListNotifier.clearAll`
@@ -306,10 +342,18 @@ class SnippetListNotifier extends AsyncNotifier<List<Snippet>> {
 
   /// Delete the snippet with the given [id] and refresh the list.
   /// 删除指定 [id] 的代码片段并刷新列表。
+  ///
+  /// Same shape as the other two `deleteItem`s: the refresh is in a `finally`,
+  /// so a failed delete cannot leave a stale list behind.
+  /// 与另外两个 `deleteItem` 同形：刷新放在 `finally` 中，失败的删除因此不可能留下
+  /// 一份陈旧的列表。
   Future<void> deleteItem(String id) async {
     final db = await ref.read(databaseProvider.future);
-    await db.delete('tb_snippets', where: 'id = ?', whereArgs: [id]);
-    ref.invalidateSelf();
+    try {
+      await db.delete('tb_snippets', where: 'id = ?', whereArgs: [id]);
+    } finally {
+      ref.invalidateSelf();
+    }
   }
 
   /// Removes every snippet, refreshing once. See

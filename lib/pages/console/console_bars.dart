@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/i18n/strings.dart';
 import '../../models/host.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/host_card.dart';
 
 /// Pinned bar of the host console: title, live/connecting indicator, refresh.
 /// 主机控制台的固定顶栏：标题、实时/连接中指示、刷新。
@@ -171,16 +172,27 @@ class HostConsoleIdentityCard extends StatelessWidget {
   /// 发行版／内核信息；读不到时为 `''`。
   final String osInfo;
 
-  /// Whether the monitor is live.
-  /// 监控是否实时。
-  final bool live;
+  /// What the console can honestly say about the host right now.
+  /// 控制台目前能如实说明的主机状态。
+  ///
+  /// Three states, not two, and for the same reason the home page has three:
+  /// when the host key is not trusted the handshake never completes, so
+  /// **nothing about the machine's availability was measured**. Rendering that
+  /// as the red "offline" badge asserts an outage nobody observed — and the two
+  /// screens then contradict each other, the home list reading "unverified"
+  /// while this card reads "offline" for the same host at the same moment.
+  /// 三态而非两态，理由与首页相同：主机密钥不受信时握手根本不会完成，因此**关于这台
+  /// 机器可用性的一切都没有被测量过**。把它渲染成红色的「离线」徽章等于断言一次没人
+  /// 观察到的宕机——而且两个界面会互相矛盾：同一时刻首页读作「待验证」，这张卡片读作
+  /// 「离线」。
+  final HostStatus status;
 
   const HostConsoleIdentityCard({
     super.key,
     required this.host,
     required this.hostname,
     required this.osInfo,
-    required this.live,
+    required this.status,
   });
 
   @override
@@ -247,9 +259,13 @@ class HostConsoleIdentityCard extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 6,
                   children: [
+                    // The same label and colour the home list uses, so the two
+                    // screens cannot describe one host differently.
+                    // 与首页列表同一套文案与配色，两个界面因此不可能对同一台主机给出
+                    // 不同说法。
                     AppBadge(
-                      label: live ? t('running') : t('offline_status'),
-                      color: live ? cs.primary : cs.error,
+                      label: hostStatusLabel(status),
+                      color: hostStatusColor(cs, status),
                     ),
                     AppBadge(label: 'SSH :${host.port}', color: cs.secondary),
                   ],

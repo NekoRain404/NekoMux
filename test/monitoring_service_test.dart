@@ -69,16 +69,19 @@ void main() {
       expect(MonitoringService.parseFree(freeOutputZh), [126435, 66172, 51797]);
     });
 
-    test(
-      'does not confuse the header row or the Swap row with the memory row',
-      () {
-        // Header row: first token non-numeric, following tokens are not numbers.
-        // Swap row: also all-numeric, but comes *after* the Mem row.
-        final parsed = MonitoringService.parseFree(freeOutputC);
-        expect(parsed[0], isNot(0));
-        expect(parsed, isNot([163839, 33033, 130806]));
-      },
-    );
+    // There was a third test here — "does not confuse the header row or the
+    // Swap row with the memory row" — asserting `parsed[0] != 0` and
+    // `parsed != [163839, 33033, 130806]`. It was subsumed twice over by the
+    // two tests above: the header row yields non-numeric tokens and the Swap
+    // row yields different integers, so either confusion changes the value the
+    // exact assertions already pin. It could not fail for any reason those two
+    // could not, which is the same "assertion that cannot bite" the rest of
+    // this remediation is removing.
+    // 此处原有第三条测试——「不会把表头行或 Swap 行当成内存行」——断言
+    // `parsed[0] != 0` 与 `parsed != [163839, 33033, 130806]`。它被上面两条测试
+    // 重复覆盖了两次：表头行的 token 不是数字，Swap 行的整数也不同，任何一种混淆都会
+    // 改变那两条精确断言已经钉住的值。它不可能因那两条覆盖不到的原因而失败——这正是
+    // 本次整改要清除的那类「无法咬人的断言」。
   });
 
   group('memoryUsagePercentFromFree', () {

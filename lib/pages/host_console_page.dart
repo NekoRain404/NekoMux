@@ -12,6 +12,7 @@ import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/host_key_prompt.dart';
 import 'console/console_bars.dart';
+import 'console/connect_outcome.dart';
 import 'console/console_function_grid.dart';
 import 'console/host_identity.dart';
 import 'console/monitor_poll_state.dart';
@@ -114,10 +115,55 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
   int _connectAttempt = 0;
 
   bool _isLive = false;
+
+  /// What this console can honestly say about the host right now.
+  /// 本控制台目前能如实说明的主机状态。
+  ///
+  /// Starts [HostStatus.unverified] because nothing has been measured yet, and
+  /// stays there whenever the handshake was refused: a rejected host key means
+  /// the connection never completed, which says nothing about whether the
+  /// machine is up. Only a failure we were allowed to observe — a timeout, a
+  /// refusal, a rejected credential — is evidence of an outage.
+  /// 初始为 [HostStatus.unverified]，因为还没有测量过任何东西；握手被拒绝时也停留在
+  /// 该状态：主机密钥被拒意味着连接从未完成，这对「机器是否在线」不构成任何证据。
+  /// 只有我们获准观察到的失败——超时、拒绝连接、凭据被拒——才是宕机的证据。
+  HostStatus _status = HostStatus.unverified;
+
+  /// Whether a connection attempt is in flight.
+  /// 是否正在尝试连接。
+  ///
+  /// Two readers depend on it — the app bar's spinner branch and the identity
+  /// card's "not live *and* not connecting" rule — so it is set through
+  /// `setState` and never mutated silently: written without a rebuild, the
+  /// whole attempt rendered as "monitor unavailable" with no spinner at all.
+  /// And because it is also the re-entrancy guard, only [_initMonitoring] may
+  /// clear it, so that a refresh during a connect cannot slip past the guard
+  /// and start a second attempt.
+  /// 有两个读者依赖它——顶栏的 spinner 分支，以及身份卡片「既非实时**又**不在连接
+  /// 中」的规则——因此它经 `setState` 写入，绝不静默改动：不触发重建地写它，整次尝试
+  /// 都会渲染成「监控不可用」，连一个 spinner 都不会出现。又因为它同时是重入守卫，
+  /// 只有 [_initMonitoring] 可以清除它，刷新才无法在连接期间绕过守卫再起一次尝试。
   bool _connecting = false;
   String? _monitorError;
   HostIdentity _identity = HostIdentity.unknown;
   CpuTimes? _lastCpuTimes;
+
+  /// The newest readings that were actually measured, or `null` while there are
+  /// none to show.
+  /// 最新一次**实际测得**的读数；没有可显示的读数时为 `null`。
+  ///
+  /// Kept apart from the chart buffer, which cannot represent this: a window
+  /// needs a number at every x, and the first CPU sample of a session has no
+  /// delta to compute, so [MonitorSamples.commit] takes a sentinel zero for it.
+  /// Rendering that sentinel as "CPU 0.0%" claims an idle machine was measured;
+  /// the panel is therefore handed `null` for it, and prints that it has no
+  /// value yet.
+  /// 与图表缓冲分开存放，因为缓冲表达不了这种状态：窗口的每个 x 都要有数字，而一次
+  /// 会话的首个 CPU 样本没有增量可算，[MonitorSamples.commit] 只能为它取哨兵值零。
+  /// 把这个哨兵渲染成「CPU 0.0%」等于宣称测到了一台空闲机器；因此交给面板的是
+  /// `null`，由它如实显示尚无读数。
+  double? _latestCpu;
+  double? _latestRam;
 
   @override
   void initState() {
@@ -155,8 +201,15 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
   bool _isCurrentAttempt(int attempt) => attempt == _connectAttempt;
 
   Future<void> _initMonitoring() async {
+    // The re-entrancy guard: an attempt already in flight owns this page's
+    // connection, and a second one started from here would tear its connection
+    // down while it is still handshaking — and leave a `Timer.periodic` from
+    // each attempt, only the last of which is ever cancelled.
+    // 重入守卫：在途的尝试拥有本页的连接，从这里再起一次会在它仍在握手时拆掉它的
+    // 连接，并给每次尝试各留一个 `Timer.periodic`，而只有最后一个会被取消。
     if (_connecting) return;
-    _connecting = true;
+    if (!mounted) return;
+    setState(() => _connecting = true);
 
     final host = widget.host;
     final attempt = ++_connectAttempt;
@@ -166,7 +219,10 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
       final cred = creds.where((c) => c.id == host.credentialId).firstOrNull;
 
       if (cred == null) {
-        _stopMonitoring(t('cred_not_found_fallback'));
+        _stopMonitoring(
+          t('cred_not_found_fallback'),
+          status: HostStatus.unverified,
+        );
         return;
       }
 
@@ -177,6 +233,16 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
       // 不传回调时 `dartssh2` 会接受任意密钥，这正是中间人想要的。
       final db = await ref.read(databaseProvider.future);
       if (!_isCurrentAttempt(attempt)) return;
+      // Whether the user (or a missing page) declined the host key during this
+      // attempt. Recorded here because this callback is the only component that
+      // knows: `dartssh2` surfaces a refused key as an auth abort, so the
+      // connection's own failure code cannot tell it apart from a bad password
+      // — see console/connect_outcome.dart for the full account.
+      // 本次尝试中用户（或已销毁的页面）是否拒绝了主机密钥。记录在这里，因为只有这个
+      // 回调知道：`dartssh2` 会把被拒的密钥以认证中止的形式抛出，因此连接自身的失败码
+      // 无法把它和密码错误区分开——完整说明见 console/connect_outcome.dart。
+      var trustRefused = false;
+
       final conn = SshConnection(
         host: host,
         credential: cred,
@@ -208,12 +274,17 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
             // Runs after several awaits, so the page may already be gone; with
             // nobody left to ask, refusing is the only safe answer.
             // 该回调在多次 await 之后执行，页面可能已经销毁；此时无人可问，拒绝是唯一安全答案。
-            if (!mounted) return false;
-            return showHostKeyPrompt(
+            if (!mounted) {
+              trustRefused = true;
+              return false;
+            }
+            final accepted = await showHostKeyPrompt(
               context,
               fingerprint: fingerprint,
               verdict: verdict,
             );
+            if (!accepted) trustRefused = true;
+            return accepted;
           },
         ),
       );
@@ -236,7 +307,21 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
         // 一句中文；现在连接上报编码（`SshConnection.failure`），句子在这里选择。这个位置
         // 属于**原因**——浮层已经在其下方打印 `monitor_unavailable_hint`，「资源监控不可用」
         // 的信息属于那里。
-        _stopMonitoring(sshConnectErrorText(conn));
+        // A refused key also makes the transport's own message wrong: it reads
+        // "authentication failed, check your credentials", sending the user to
+        // inspect a credential that was never the problem. When the key is what
+        // was declined, say so instead.
+        // 密钥被拒时，传输层自己的文案也是错的：它写着「认证失败，请检查凭据」，把用户
+        // 引去排查一个根本不是问题所在的凭据。既然是密钥被拒，就说密钥。
+        _stopMonitoring(
+          trustRefused
+              ? t('cannot_verify_host_key')
+              : sshConnectErrorText(conn),
+          // The rule lives in console/connect_outcome.dart, where it is a pure
+          // function and therefore testable without a server.
+          // 该规则位于 console/connect_outcome.dart，是纯函数，因此无需服务器即可测试。
+          status: statusForConnectFailure(trustRefused: trustRefused),
+        );
         return;
       }
 
@@ -246,9 +331,12 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
       setState(() {
         _isLive = true;
         _connecting = false;
+        _status = HostStatus.online;
         _monitorError = null;
       });
-      await ref.read(hostListProvider.notifier).setOnline(host.id, true);
+      await ref
+          .read(hostListProvider.notifier)
+          .setStatus(host.id, HostStatus.online);
       if (!_isCurrentAttempt(attempt)) return;
 
       _startPolling(conn);
@@ -359,12 +447,19 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
       _lastCpuTimes = sample.cpuTimes;
       if (mounted) {
         setState(() {
+          // What the panel shows, as measured: `cpuUsage` is null on the first
+          // sample of a session — there is no previous counter snapshot to
+          // subtract — and that absence is carried to the panel as an absence.
+          // 面板所显示的、真正测得的数值：一次会话的首个样本里 `cpuUsage` 为
+          // null——没有上一份计数器快照可减——这份「无」就以「无」的形式传给面板。
+          _latestCpu = sample.cpuUsage;
+          _latestRam = sample.memoryUsage;
           _samples.commit(
             // No previous counter snapshot means no delta yet: the first CPU
-            // point of a session is not measurable, so it stays at 0 instead of
-            // inheriting the number a previous session left behind.
+            // point of a session is not measurable, so the *chart* keeps 0
+            // rather than inheriting the number a previous session left behind.
             // 没有上一份计数器快照就没有增量：本次会话的首个 CPU 点无法测量，因此
-            // 保持 0，而不是沿用上一次会话遗留的数值。
+            // **图表**保持 0，而不是沿用上一次会话遗留的数值。
             cpu: sample.cpuUsage ?? 0,
             ram: sample.memoryUsage,
           );
@@ -405,22 +500,29 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
   /// frozen chart.
   /// 「连不上」与「不再应答」共用一条路径：两者都让用户没有实时数据，也都给出同样
   /// 两条出路；把它们分开处理，正是后者过去变成图表静默冻结的原因。
-  void _stopMonitoring(String message) {
+  void _stopMonitoring(
+    String message, {
+    HostStatus status = HostStatus.offline,
+  }) {
     _pollTimer?.cancel();
     _pollTimer = null;
     _teardownMonitor();
     if (!mounted) return;
 
-    ref.read(hostListProvider.notifier).setOnline(widget.host.id, false);
+    ref.read(hostListProvider.notifier).setStatus(widget.host.id, status);
     setState(() {
       _isLive = false;
       _connecting = false;
+      _status = status;
       _monitorError = message;
       _lastCpuTimes = null;
       // No live data is being shown, so nothing may stay on screen looking like
-      // it is.
-      // 没有实时数据在显示，因此屏幕上不得留下像是实时数据的东西。
+      // it is — not the curve, and not the two percentages either.
+      // 没有实时数据在显示，因此屏幕上不得留下像是实时数据的东西——曲线如此，两个
+      // 百分比数字也一样。
       _samples.clear();
+      _latestCpu = null;
+      _latestRam = null;
     });
     ScaffoldMessenger.of(
       context,
@@ -472,7 +574,18 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
 
   /// Drops the current connection and starts over.
   /// 丢弃当前连接并重新开始。
+  ///
+  /// A tap that arrives while an attempt is already connecting does nothing:
+  /// tearing that attempt down to start a fresh one is exactly the re-entrancy
+  /// [_initMonitoring]'s guard exists to prevent — and it would have been worse
+  /// than a duplicate, because the teardown disposes the connection the running
+  /// attempt is still handshaking on, so the user's "retry" would kill the
+  /// connection attempt it was asking for and then report the failure.
+  /// 尝试仍在连接时到来的点击什么也不做：拆掉它再起一次，正是 [_initMonitoring]
+  /// 的守卫所要阻止的重入——而且后果比「重复一次」更糟：拆除会释放那次运行中的尝试
+  /// 仍在握手的连接，于是用户的「重试」杀死了它正要发起的连接，然后报告失败。
   Future<void> _retryMonitoring() async {
+    if (_connecting) return;
     _pollTimer?.cancel();
     _pollTimer = null;
     // Abandon whatever is in flight before the connection it uses is gone.
@@ -482,12 +595,20 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
     if (mounted) {
       setState(() {
         _monitorError = null;
-        _connecting = false;
         _isLive = false;
         _lastCpuTimes = null;
+        // `_connecting` is deliberately not cleared here: the attempt that is
+        // about to start sets it (through `setState`) and clears it on every
+        // exit path, so the flag never lies about an attempt being in flight.
+        // 此处刻意不清 `_connecting`：即将开始的那次尝试会（经 `setState`）把它
+        // 置上，并在每条退出路径上清除它，标志因此从不会谎报「有尝试在途」。
         // Keep the last real points visible while reconnecting, but let the
-        // first sample of the new session replace all of them.
-        // 重连期间保留最后的真实数据点，但让新会话的首个样本整体替换它们。
+        // first sample of the new session replace all of them. The last real
+        // *readings* stay too — they are still the newest numbers measured, and
+        // the badge above them says "recent samples", not "live".
+        // 重连期间保留最后的真实数据点，但让新会话的首个样本整体替换它们。最后的真实
+        // **读数**同样保留——它们仍是最新测得的数字，而它们上方的徽标写着「最近样本」
+        // 而不是「实时」。
         _samples.beginSession();
       });
     }
@@ -519,7 +640,7 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
                 host: host,
                 hostname: _identity.hostname,
                 osInfo: _identity.osInfo,
-                live: _isLive,
+                status: _status,
               ),
             ),
             SliverToBoxAdapter(
@@ -527,8 +648,8 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
                 glow: _glowController,
                 cpuData: _samples.cpuData,
                 ramData: _samples.ramData,
-                latestCpu: _samples.latestCpu,
-                latestRam: _samples.latestRam,
+                latestCpu: _latestCpu,
+                latestRam: _latestRam,
                 live: _isLive,
                 connecting: _connecting,
                 error: _monitorError,

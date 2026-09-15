@@ -12,6 +12,25 @@ import 'package:flutter/material.dart';
 
 import '../../widgets/app_ui.dart';
 
+/// Whether a subtitle still says something its title does not.
+/// 副标题是否还说了标题没说的事。
+///
+/// The translations are deliberately bilingual — a "中文标题" with an "English
+/// subtitle" underneath — which reads well in an interface that is not English,
+/// but makes every row say the same thing twice once the app is switched to
+/// English (`Terminal Font Size` over `Terminal Font Size`, and the same for
+/// Connection Timeout, Haptic Feedback and others). A subtitle equal to its
+/// title carries no information in any language, so it is dropped here rather
+/// than rendered twice. Fixing it in the widget rather than in the translation
+/// data keeps the bilingual look everywhere it is still doing something, and
+/// covers every language at once.
+/// 译文有意做成中英对照——「中文标题」下面配一行英文副标题——在非英文界面下观感很
+/// 好，但界面切到英文后每一行都会把同一句话显示两遍（`Terminal Font Size` 上方又是
+/// `Terminal Font Size`，Connection Timeout、Haptic Feedback 等也是如此）。与标题
+/// 相同的副标题在任何语言下都不携带信息，因此这里直接不渲染，而不是显示两遍。在控件
+/// 里修而不是改译文，既保住了其它地方仍然有效的中英对照观感，也一次覆盖所有语言。
+bool _hasDistinctSub(String title, String sub) => sub.trim() != title.trim();
+
 /// Section heading, e.g. "Appearance" or "Data".
 /// 分节标题，例如「外观」或「数据」。
 class SettingsSectionHeader extends StatelessWidget {
@@ -101,15 +120,16 @@ class SettingsSliderTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: cs.onSurface, fontSize: 14),
                 ),
-                Text(
-                  sub,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
+                if (_hasDistinctSub(title, sub))
+                  Text(
+                    sub,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.48),
+                      fontSize: 10,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -186,15 +206,16 @@ class SettingsSwitchTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: cs.onSurface, fontSize: 14),
                 ),
-                Text(
-                  sub,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
+                if (_hasDistinctSub(title, sub))
+                  Text(
+                    sub,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.48),
+                      fontSize: 10,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -301,17 +322,25 @@ class _SettingsInputTileState extends State<SettingsInputTile> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: cs.onSurface, fontSize: 14),
                 ),
-                Text(
-                  _hasError ? widget.errorText : widget.sub,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _hasError
-                        ? cs.error
-                        : cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
+                // An error is never suppressed, even in the impossible case of
+                // it matching the title: it is the reason the edit was refused,
+                // not a restatement of the label. Only the idle subtitle obeys
+                // the rule.
+                // 出错时一律显示，即使出现「错误文字恰好等于标题」这种不可能的情
+                // 况：它是这次修改被拒的原因，而不是标题的复述。只有空闲时的副标题
+                // 才受该规则约束。
+                if (_hasError || _hasDistinctSub(widget.title, widget.sub))
+                  Text(
+                    _hasError ? widget.errorText : widget.sub,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _hasError
+                          ? cs.error
+                          : cs.onSurface.withValues(alpha: 0.48),
+                      fontSize: 10,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -389,19 +418,24 @@ class SettingsListTile extends StatelessWidget {
               style: TextStyle(color: cs.onSurface, fontSize: 14),
             ),
           ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.48),
-                fontSize: 12,
+          // The gap travels with the text: a dropped subtitle must not leave its
+          // spacing behind as a mystery indent before the chevron.
+          // 间距跟着文字一起走：副标题不显示时，不能在箭头前留下一段莫名的空白。
+          if (_hasDistinctSub(title, sub)) ...[
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                sub,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  color: cs.onSurface.withValues(alpha: 0.48),
+                  fontSize: 12,
+                ),
               ),
             ),
-          ),
+          ],
           const SizedBox(width: 4),
           Icon(
             Icons.chevron_right,
@@ -455,15 +489,16 @@ class SettingsActionTile extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                Text(
-                  sub,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.48),
-                    fontSize: 10,
+                if (_hasDistinctSub(title, sub))
+                  Text(
+                    sub,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.48),
+                      fontSize: 10,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -507,19 +542,23 @@ class SettingsInfoTile extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.48),
-                fontSize: 12,
+          // Same rule as the list tile: the gap goes with the text it separated.
+          // 与列表行同一条规则：间距跟着它所分隔的文字一起消失。
+          if (_hasDistinctSub(title, sub)) ...[
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                sub,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  color: cs.onSurface.withValues(alpha: 0.48),
+                  fontSize: 12,
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );

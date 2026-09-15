@@ -1,9 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/app_info.dart';
 import '../core/i18n/strings.dart';
 import '../pages/credential_list_page.dart';
 import '../pages/snippet_list_page.dart';
 import '../pages/settings_page.dart';
+
+// Metrics a section header and the tiles it labels must agree on.
+// 分节标题与其下方 tile 必须一致的尺寸。
+//
+// A tile's title text begins after everything in front of it — its own two
+// paddings, the leading icon square and the gap that follows — so the header's
+// left inset is that same sum. Sharing the arithmetic is what puts the two on
+// one left edge; a header that merely happens to be left-aligned would still
+// sit at the wrong x.
+// tile 标题文字的起点，等于排在它前面的所有东西之和——自身两层内边距、前置图标方块
+// 及其后的间隙；分节标题的左缩进就是这个和值。共享这段算术，两者才落在同一条左边
+// 缘上；仅仅「也靠左」的标题仍然会停在错误的横坐标上。
+const double _tileOuterInset = 12; // Tile's own outer padding / tile 外层内边距
+const double _tileInnerInset = 12; // Padding inside the tap target / 点击区内边距
+const double _tileIconBox = 32; // Leading icon square / 前置图标方块
+const double _tileIconGap = 12; // Icon-to-text gap / 图标与文字间距
+const double _tileTextInset =
+    _tileOuterInset + _tileInnerInset + _tileIconBox + _tileIconGap;
 
 class AppDrawer extends ConsumerWidget {
   final String currentModule;
@@ -22,6 +41,12 @@ class AppDrawer extends ConsumerWidget {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       child: SafeArea(
         child: Column(
+          // Start, not the default centre: `_Section` is a Padding around a
+          // short Text, which used to shrink-wrap and centre itself in the
+          // drawer while every `_Tile` beside it filled the width.
+          // 用 start 而不是默认的 center：`_Section` 是包着短 Text 的 Padding，
+          // 原本会收缩并居中，而旁边的 `_Tile` 都是占满宽度的。
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             /// Header
             Container(
@@ -47,7 +72,7 @@ class AppDrawer extends ConsumerWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'NekoMux',
+                    appName,
                     style: TextStyle(
                       color: cs.onSurface,
                       fontSize: 18,
@@ -119,9 +144,9 @@ class AppDrawer extends ConsumerWidget {
                 Navigator.pop(context);
                 showAboutDialog(
                   context: context,
-                  applicationName: 'NekoMux',
-                  applicationVersion: '1.0.0',
-                  applicationLegalese: '© 2026 NekoMux',
+                  applicationName: appName,
+                  applicationVersion: appVersion,
+                  applicationLegalese: '© 2026 $appName',
                   children: [
                     const SizedBox(height: 8),
                     Text(t('app_desc'), style: const TextStyle(fontSize: 13)),
@@ -132,11 +157,20 @@ class AppDrawer extends ConsumerWidget {
             const Spacer(),
             Padding(
               padding: const EdgeInsets.all(20),
-              child: Text(
-                'v1.0.0-beta',
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.3),
-                  fontSize: 10,
+              // Still centred: the column above is start-aligned so the section
+              // headers line up with the tiles, and without this the footer
+              // would be dragged left with them. Centred is where it has always
+              // been, and the defect fix does not move it.
+              // 仍然是居中：上面的 Column 改成 start 对齐是为了让分节标题与 tile 对
+              // 齐，若不这样，页脚会被一并拽到左边。居中是它一直以来的位置，本次修复不
+              // 移动它。
+              child: Center(
+                child: Text(
+                  'v$appVersion',
+                  style: TextStyle(
+                    color: cs.onSurface.withValues(alpha: 0.3),
+                    fontSize: 10,
+                  ),
                 ),
               ),
             ),
@@ -166,7 +200,10 @@ class _Section extends StatelessWidget {
   const _Section(this.title);
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 16, 20, 4),
+    // Left inset is where a tile's title text starts, so the heading sits
+    // directly above the labels it groups rather than above their icons.
+    // 左缩进取 tile 标题文字的起点，标题便正好压在其所辖标签的正上方，而不是对着图标。
+    padding: const EdgeInsets.fromLTRB(_tileTextInset, 16, 20, 4),
     child: Text(
       title,
       style: TextStyle(
@@ -199,7 +236,10 @@ class _Tile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final c = cs.primary;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: _tileOuterInset,
+        vertical: 3,
+      ),
       child: Material(
         color: selected ? c.withValues(alpha: 0.10) : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
@@ -207,12 +247,15 @@ class _Tile extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(
+              horizontal: _tileInnerInset,
+              vertical: 10,
+            ),
             child: Row(
               children: [
                 Container(
-                  width: 32,
-                  height: 32,
+                  width: _tileIconBox,
+                  height: _tileIconBox,
                   decoration: BoxDecoration(
                     color: selected
                         ? c.withValues(alpha: 0.12)
@@ -225,7 +268,7 @@ class _Tile extends StatelessWidget {
                     size: 18,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: _tileIconGap),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

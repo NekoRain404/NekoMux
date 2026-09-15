@@ -17,13 +17,27 @@ import '../../core/i18n/strings.dart';
 /// 在生成备份内容之前，询问它允许携带什么。
 ///
 /// Returns `null` when the dialog is dismissed, `false` for the default export
-/// — settings, hosts and snippets, no credentials — and `true` only when the
-/// user ticked the opt-in box themselves. The caller must treat `null` as "do
-/// not export": an accidental tap outside the dialog must never be read as
-/// consent to write passwords to the clipboard.
-/// 对话框被关闭时返回 `null`；默认导出（设置、主机与快捷指令，不含凭据）返回
-/// `false`；只有当用户亲自勾选选项时才返回 `true`。调用方必须把 `null` 当作
-/// 「不导出」：误点对话框外部绝不能被理解为同意把密码写入剪贴板。
+/// (no credentials) and `true` only when the user ticked the opt-in box
+/// themselves. The caller must treat `null` as "do not export": an accidental
+/// tap outside the dialog must never be read as consent to write passwords to
+/// the clipboard.
+/// 对话框被关闭时返回 `null`；默认导出（不含凭据）返回 `false`；只有当用户亲自勾选
+/// 选项时才返回 `true`。调用方必须把 `null` 当作「不导出」：误点对话框外部绝不能被
+/// 理解为同意把密码写入剪贴板。
+///
+/// What that default export carries is the caller's half, defined once in
+/// `services/backup_service.dart`: every section of the payload, with
+/// `BackupSection.settings` — the theme, the language, the font size, the
+/// connect timeout — gathered by the caller from `tb_settings` and handed to
+/// `buildExportPayload`. Passing those rows is what makes this dialog's promise
+/// — and the "export all data as JSON" tile that opens it — true; the parameter
+/// has an empty default only so that a caller without a database still
+/// compiles, and an export that uses it silently leaves the settings behind.
+/// 默认导出携带什么，是调用方的那一半，且只在 `services/backup_service.dart` 中定义：
+/// 载荷的每一个分节，其中 `BackupSection.settings`——主题、语言、字号、连接超时——
+/// 由调用方从 `tb_settings` 收集后交给 `buildExportPayload`。传入这些行，本对话框的
+/// 承诺——以及打开它的那块「导出所有数据为 JSON」磁贴——才成立；该参数的默认值为空，
+/// 只是为了让没有数据库的调用方仍能编译，而采用了那个默认值的导出会悄悄丢下设置。
 ///
 /// The checkbox is the explicit, informed opt-in the export needs: the text next
 /// to it names what would be included, and the note below it switches from what

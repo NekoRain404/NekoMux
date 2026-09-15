@@ -1,7 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:neko_mux/core/i18n/strings.dart';
 import 'package:neko_mux/pages/sftp/sftp_path.dart';
 
 void main() {
+  // The active language is global mutable state; the root crumb's label comes
+  // from the table, so tests that read it pick their own and leave the default
+  // behind.
+  // 当前语言是全局可变状态；根片段的标签来自翻译表，因此读取它的测试自行选定语言，
+  // 并在结束时还原默认值。
+  tearDown(() => AppStrings.setLang('zh'));
+
   group('sftpExtension', () {
     test('takes the last extension of a multi-dot name', () {
       expect(sftpExtension('archive.tar.gz'), 'gz');
@@ -151,9 +159,24 @@ void main() {
     });
 
     test('the root label is the localised one, without its decoration', () {
-      // The path bar has never shown the house emoji stored with the label.
+      // The whole label, not just the absence of the emoji: asserting only
+      // `isNot(contains('🏠'))` also passes for a root label of `''` — i.e. for
+      // dropping the `t('root_dir')` lookup entirely, which is what the "root"
+      // crumb would then show. The emoji is checked separately because it is
+      // the part the path bar must *not* render.
+      // 断言完整的标签，而不只是「没有那个 emoji」：只断言 `isNot(contains('🏠'))`
+      // 对空字符串同样成立——也就是说，把 `t('root_dir')` 整个去掉也能通过，而那样
+      // 根片段就什么都不显示了。emoji 单独检查，因为它是路径栏**不得**渲染的部分。
+      AppStrings.setLang('en');
+      expect(sftpBreadcrumbs('/').single.label, 'Root');
+      expect(sftpBreadcrumbs('/etc').first.label, 'Root');
+
+      // The label follows the active language — a hardcoded English (or the
+      // stored, decorated string) would not.
+      // 该标签随当前语言变化——硬编码英文（或直接使用带装饰的存储字符串）都不会。
+      AppStrings.setLang('zh');
+      expect(sftpBreadcrumbs('/').single.label, '根目录');
       expect(sftpBreadcrumbs('/').single.label, isNot(contains('🏠')));
-      expect(sftpBreadcrumbs('/etc').first.label, isNot(contains('🏠')));
     });
 
     test('the last crumb always points at the directory being shown', () {

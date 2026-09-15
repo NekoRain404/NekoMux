@@ -98,24 +98,81 @@ Future<String?> showSftpNameDialog(
   required String hint,
   required String confirmLabel,
   String initial = '',
-}) {
-  final cs = Theme.of(context).colorScheme;
-  final controller = TextEditingController(text: initial);
-  return showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
+}) => showDialog<String>(
+  context: context,
+  builder: (ctx) => _SftpNameDialog(
+    title: title,
+    hint: hint,
+    confirmLabel: confirmLabel,
+    initial: initial,
+  ),
+);
+
+/// The prompt itself, stateful so its text field's controller has an owner.
+/// 提问本身；作为有状态控件，输入框控制器因此有明确归属。
+///
+/// The controller used to be created in [showSftpNameDialog]'s own body, where
+/// nothing owned it: every rename, new file and new folder leaked one.
+/// 该控制器此前在 [showSftpNameDialog] 的函数体内创建，没有任何对象拥有它：每次
+/// 重命名、新建文件与新建文件夹都会泄漏一个。
+///
+/// Disposing it after the `await showDialog(...)` future completes is *not* the
+/// fix, and fails in the field: that future completes when the route is popped,
+/// while the dialog is still animating out and its field still rebuilding — and
+/// a rebuild that reaches a disposed controller throws `A TextEditingController
+/// was used after being disposed`. Ownership by the dialog, released when the
+/// route itself is disposed, is the only correct shape; it is the same reason
+/// `settings/backup_dialogs.dart` made its restore dialog stateful.
+/// 在 `await showDialog(...)` 的 future 完成后销毁它**不是**解法，而且会在真机上
+/// 出问题：该 future 在路由被弹出时就完成了，而对话框此时仍在退场动画中、其输入框
+/// 仍在重建——重建碰到已销毁的控制器就会抛出
+/// `A TextEditingController was used after being disposed`。由对话框持有、在路由
+/// 自身销毁时释放，才是唯一正确的形态；`settings/backup_dialogs.dart` 把恢复对话框
+/// 改成有状态控件，正是同一个理由。
+class _SftpNameDialog extends StatefulWidget {
+  const _SftpNameDialog({
+    required this.title,
+    required this.hint,
+    required this.confirmLabel,
+    required this.initial,
+  });
+
+  final String title;
+  final String hint;
+  final String confirmLabel;
+  final String initial;
+
+  @override
+  State<_SftpNameDialog> createState() => _SftpNameDialogState();
+}
+
+class _SftpNameDialogState extends State<_SftpNameDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AlertDialog(
       backgroundColor: cs.surface,
-      title: Text(title, style: TextStyle(color: cs.onSurface)),
+      title: Text(widget.title, style: TextStyle(color: cs.onSurface)),
       content: TextField(
-        controller: controller,
+        controller: _controller,
         autofocus: true,
         style: TextStyle(color: cs.onSurface),
         cursorColor: cs.secondary,
-        decoration: _dialogInputDecoration(context, hint),
+        decoration: _dialogInputDecoration(context, widget.hint),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(ctx),
+          onPressed: () => Navigator.pop(context),
           child: Text(
             t('cancel'),
             style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
@@ -123,18 +180,21 @@ Future<String?> showSftpNameDialog(
         ),
         TextButton(
           onPressed: () {
-            final name = controller.text.trim();
-            if (name.isEmpty || name == initial) {
-              Navigator.pop(ctx);
+            final name = _controller.text.trim();
+            if (name.isEmpty || name == widget.initial) {
+              Navigator.pop(context);
               return;
             }
-            Navigator.pop(ctx, name);
+            Navigator.pop(context, name);
           },
-          child: Text(confirmLabel, style: TextStyle(color: cs.secondary)),
+          child: Text(
+            widget.confirmLabel,
+            style: TextStyle(color: cs.secondary),
+          ),
         ),
       ],
-    ),
-  );
+    );
+  }
 }
 
 /// Confirms deleting a single entry by [name].

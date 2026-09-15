@@ -79,28 +79,16 @@ void main() {
       });
     });
 
-    test('has no duplicate key inside a language file', () {
-      final keyLine = RegExp(r"^\s*'([a-z0-9_]+)':", multiLine: true);
-      var scanned = 0;
-
-      for (final file in languageFiles()) {
-        final seen = <String>{};
-        for (final match in keyLine.allMatches(file.readAsStringSync())) {
-          final key = match.group(1)!;
-          scanned++;
-          expect(
-            seen.add(key),
-            isTrue,
-            reason: 'duplicate key "$key" in ${file.path}',
-          );
-        }
-      }
-
-      // A const map is already a compile error when a key repeats, but the
-      // scan is what makes the intent explicit — and it must not pass by
-      // finding nothing at all.
-      expect(scanned, greaterThan(0), reason: 'key scan matched nothing');
-    });
+    // There was a test here that scanned the language files for a duplicate
+    // key. It could not fail: every table is a `const Map<String, String>`
+    // literal, and a repeated key in a const map literal is a **compile
+    // error** — the failing state does not compile, so no run of this suite
+    // ever observes it. The compiler owns that rule; a test that only restates
+    // it manufactures confidence instead of adding any.
+    // 这里原有一条扫描语言文件、检查键重复的测试，它无法失败：每张表都是
+    // `const Map<String, String>` 字面量，而 const map 中重复的键是**编译错误**
+    // ——失败状态根本无法编译，因此本测试套件的任何一次运行都观察不到它。这条规则
+    // 属于编译器；只把它复述一遍的测试不会增加任何约束，只会制造虚假的把握。
 
     test('matches AppStrings.supportedLanguages exactly', () {
       expect(
@@ -151,10 +139,24 @@ void main() {
       expect(AppStrings.get('save'), 'save');
     });
 
-    test('t() is a shorthand for AppStrings.get', () {
-      for (final key in byLanguage['zh']!.keys) {
-        expect(t(key), AppStrings.get(key), reason: key);
+    test('t() answers with the active language\'s own table value', () {
+      // `t` is defined as `AppStrings.get`, so asserting `t(key) ==
+      // AppStrings.get(key)` compares a thing with itself and holds for any
+      // implementation of `t` that nobody touched. What a caller can actually
+      // observe is the value that comes back, against the language's own
+      // table: it must be that table's entry, and it must change when the
+      // language does.
+      // `t` 就定义为 `AppStrings.get`，因此断言 `t(key) == AppStrings.get(key)`
+      // 是拿一个东西和它自己比，只要没人改动 `t` 就恒成立。调用方真正能观察到的是
+      // 返回值本身：它必须是**当前语言**表里的那一条，并且随语言切换而变化。
+      for (final lang in AppStrings.supportedLanguages.keys) {
+        AppStrings.setLang(lang);
+        expect(t('save'), byLanguage[lang]!['save'], reason: lang);
+        expect(t('conn_timeout'), byLanguage[lang]!['conn_timeout'], reason: lang);
       }
+
+      // The documented fallback, through the same entry point.
+      expect(t('__no_such_key__'), '__no_such_key__');
     });
 
     test('every convenience getter resolves to a defined key', () {

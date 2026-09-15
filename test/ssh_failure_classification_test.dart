@@ -11,7 +11,14 @@ import 'package:neko_mux/services/ssh_service.dart';
 /// `dart:io`'s socket layer (`Socket.connect`) and `dartssh2`'s transport
 /// (`SSHHostkeyError`, `SSHAuthFailError`) are where they come from, so a change
 /// in either package that alters its wording shows up here as a failing
-/// classification rather than as an English sentence on a user's screen.
+/// classification rather than as an English sentence on a user's screen. The one
+/// exception is [defensiveTimeoutSpellings], which is labelled as the synthetic
+/// case it is rather than dressed up as a capture.
+/// 下面的字符串是这些失败真实产生的文本，而非编造的例子——它们来自 `dart:io` 的套接字层
+/// （`Socket.connect`）与 `dartssh2` 的传输层（`SSHHostkeyError`、
+/// `SSHAuthFailError`）；任一依赖改变措辞，都会在这里表现为分类失败，而不是在用户屏幕上
+/// 表现为一句英文。唯一的例外是 [defensiveTimeoutSpellings]，它被如实标注为合成用例，
+/// 而不是伪装成抓取。
 /// 下面的字符串是这些失败真实产生的文本，而非编造的例子——它们来自 `dart:io` 的套接字层
 /// （`Socket.connect`）与 `dartssh2` 的传输层（`SSHHostkeyError`、
 /// `SSHAuthFailError`）；任一依赖改变措辞，都会在这里表现为分类失败，而不是在用户屏幕上
@@ -22,14 +29,47 @@ import 'package:neko_mux/services/ssh_service.dart';
 /// 种语言。
 final cjk = RegExp('[\\u3000-\\u303f\\u4e00-\\u9fff\\uff00-\\uffef]');
 
-/// `Socket.connect`'s own timeout, and the variants around it.
-/// `Socket.connect` 自身的超时，以及它附近的几种写法。
+/// The two timeout texts that really occur, both quoted from the SDK that
+/// raises them:
+/// 真正会出现的两种超时文本，均引自抛出它们的 SDK：
+///
+/// * `Socket.connect(..., timeout:)` — the call the SSH socket is opened with
+///   (`dart:io`, `socket_patch.dart`, the `onTimeout` of that path).
+/// * `Future.timeout` — `TimeoutException("Future not completed", timeLimit)`
+///   in `dart:async`'s `future_impl.dart`, rendered as
+///   `TimeoutException after <duration>: <message>`.
+/// * `Socket.connect(..., timeout:)`——打开 SSH 套接字所用的调用（`dart:io` 的
+///   `socket_patch.dart` 中该路径的 `onTimeout`）。
+/// * `Future.timeout`——`dart:async` 的 `future_impl.dart` 中的
+///   `TimeoutException("Future not completed", timeLimit)`，呈现为
+///   `TimeoutException after <duration>: <message>`。
+///
+/// `dartssh2` itself raises no timeout error: it takes `connectTimeout` and
+/// hands it straight to `Socket.connect` (`socket/ssh_socket_io.dart`), which is
+/// why the first string is the one the app actually meets.
+/// `dartssh2` 自身不抛超时错误：它把 `connectTimeout` 直接交给 `Socket.connect`
+/// （`socket/ssh_socket_io.dart`），这正是应用真正会遇到第一种字符串的原因。
 const timeoutErrors = [
   'SocketException: Connection timed out, host: 10.0.0.1, port: 22 '
       '(OS Error: Connection timed out, errno = 110)',
-  'Connection timeout',
   'TimeoutException after 0:00:10.000000: Future not completed',
 ];
+
+/// Timeout wordings **no dependency in this project emits** — synthetic, and
+/// kept on purpose.
+/// **本项目依赖不会产生**的超时措辞——合成用例，有意保留。
+///
+/// This list used to sit inside [timeoutErrors], presented as a verbatim capture
+/// alongside the two above; nothing in `dart:io`, `dartssh2` or the platform
+/// produces it, and a fixture whose provenance is overstated is worse than no
+/// fixture. It stays because the classifier matches two separate substrings —
+/// `'timeout'` and `'timed out'` — and the captured strings only exercise the
+/// second: dropping this case would leave the first clause unconstrained.
+/// 这份列表此前位于 [timeoutErrors] 之中，与上面两条并列，被当作逐字抓取呈现；而
+/// `dart:io`、`dartssh2` 与平台都不会产生它，来源被夸大的用例比没有用例更糟。它之所
+/// 以保留，是因为分类器分别匹配 `'timeout'` 与 `'timed out'` 两个子串，而抓取到的
+/// 字符串只覆盖后者：删掉本条会让前一个分支失去约束。
+const defensiveTimeoutSpellings = ['Connection timeout'];
 
 /// What the verifier's refusal turns into: `SSHHostkeyError` in the transport.
 /// 验证回调拒绝后变成的东西：传输层里的 `SSHHostkeyError`。
@@ -83,7 +123,7 @@ void main() {
 
   group('classifySshFailure', () {
     test('every listed failure gets its own code', () {
-      for (final error in timeoutErrors) {
+      for (final error in [...timeoutErrors, ...defensiveTimeoutSpellings]) {
         expect(
           classifySshFailure(error),
           SshFailure.connTimeout,
@@ -126,6 +166,7 @@ void main() {
       final produced = <SshFailure>{
         for (final error in [
           ...timeoutErrors,
+          ...defensiveTimeoutSpellings,
           ...hostKeyErrors,
           ...authErrors,
           ...refusedErrors,

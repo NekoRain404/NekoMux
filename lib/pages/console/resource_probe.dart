@@ -103,7 +103,11 @@ class ResourceProbe {
 
     final free = await probeCommand(run, memoryCommand, timeout: timeout);
     final memory = MonitoringService.parseFree(free.stdout);
-    if (memory[0] <= 0) {
+    // `isEmpty` first: a `free` with no memory row now parses to an empty list
+    // rather than to the swap row's numbers or to a believable all-zero row.
+    // 先判 `isEmpty`：没有内存行的 `free` 现在解析为空列表，而不再是交换行的数字，
+    // 也不再是一行看起来可信的全零。
+    if (memory.isEmpty || memory[0] <= 0) {
       throw ProbeException(
         ProbeFailure.failed,
         '$memoryCommand: ${describeOutput(free.stdout)}',
@@ -115,7 +119,11 @@ class ResourceProbe {
       cpuUsage: previous == null
           ? null
           : MonitoringService.cpuUsageBetween(previous, current),
-      memoryUsage: MonitoringService.memoryUsagePercentFromFree(free.stdout),
+      // Non-null by construction: the guard above already rejected an empty or
+      // non-positive parse of this same output.
+      // 由构造保证非空：上面的守卫已经拒绝对同一份输出的空解析与非正解析。
+      memoryUsage:
+          MonitoringService.memoryUsagePercentFromFree(free.stdout) ?? 0,
     );
   }
 }

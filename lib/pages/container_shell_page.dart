@@ -157,6 +157,17 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
   Future<void> _fetchContainers() async {
     final ssh = _ssh;
     if (ssh == null || ssh.state != SshConnectionState.connected) {
+      // Reachable after disposal: `_runDockerAction` refreshes after a
+      // confirmed change, and the user may have popped the page while that
+      // `docker stop` was still running — at which point `dispose` has already
+      // disconnected `_ssh`, so this branch is the one that runs on a dead
+      // State. Without the guard that threw `setState() called after dispose`,
+      // swallowed by the action's `catch`.
+      // 销毁之后仍可到达：`_runDockerAction` 在确认变更后刷新，而用户可能在那条
+      // `docker stop` 仍在运行时就把页面弹掉——此时 `dispose` 早已断开 `_ssh`，
+      // 于是正是这个分支会在已死的 State 上运行。没有守卫时它会抛
+      // `setState() called after dispose`，再被该操作的 `catch` 吞掉。
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _isRefreshing = false;
@@ -361,8 +372,33 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
     }
     try {
       final result = await ssh.runCommand(dockerLogsCommand(container.name));
+
+      /// The exit status decides whether this is a log or a failure, exactly as
+      /// it does for the listing and the actions above. Reading `combined`
+      /// alone made a refused `docker logs` (`No such container`, `permission
+      /// denied while trying to connect to the Docker daemon socket`) arrive as
+      /// an empty string, which the viewer rendered as "no output" — the same
+      /// thing a container that has honestly logged nothing shows, so the user
+      /// could not tell a silent container from a command that never ran.
+      /// 退出状态决定这是日志还是失败，与上面列表和操作的判断完全一致。只看
+      /// `combined` 会让被拒绝的 `docker logs`（`No such container`、
+      /// `permission denied while trying to connect to the Docker daemon socket`）
+      /// 以空字符串到达，查看器把它渲染成「无输出」——与「容器确实什么都没记」长得
+      /// 一模一样，用户因此分不清是容器沉默还是命令根本没跑成。
+      if (!result.ok) {
+        return '${t('error')}: ${remoteFailureText(result)}';
+      }
+
+      // A successful `docker logs` that printed nothing really did print
+      // nothing. `no_data` is the closest key the table has for it — there is
+      // no `no_output` entry in any of the eight shipped languages — and an
+      // empty box would look like a viewer that failed to render. (The key
+      // itself is not ours to add: `core/i18n` is a different owner.)
+      // 成功却什么都没打印的 `docker logs` 确实是空的。`no_data` 是翻译表里最接近
+      // 的键——八种已发布语言里都没有 `no_output` 这一条——而空白的框看起来像查看器
+      // 渲染失败。（该键本身不归本文件添加：`core/i18n` 属于另一位负责人。）
       final text = result.combined;
-      return text.isEmpty ? '(no output)' : text;
+      return text.isEmpty ? t('no_data') : text;
     } catch (e) {
       return '${t('error')}: $e';
     }

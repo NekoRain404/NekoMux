@@ -31,6 +31,24 @@ const connectionFailures = [
   SshFailure.hostKeyVerify,
 ];
 
+/// The table key each failure kind must resolve to when there is no detail.
+/// 无细节时每种失败所必须解析到的表键。
+///
+/// Stated here rather than derived from the function under test: the point of
+/// the assertion is *which* sentence a kind produces, and a test that reads the
+/// mapping out of `sshFailureText` cannot disagree with it.
+/// 在此明确列出，而不是从被测函数推导：断言要问的正是「某种失败产生哪一句」，而从
+/// `sshFailureText` 里读出映射的测试不可能与它不一致。
+const expectedKeys = <SshFailure, String>{
+  SshFailure.notConnected: 'ssh_not_connected',
+  SshFailure.connTimeout: 'conn_timeout',
+  SshFailure.authFailed: 'auth_failed',
+  SshFailure.connRefused: 'conn_refused',
+  SshFailure.hostUnreachable: 'host_unreachable',
+  SshFailure.hostKeyVerify: 'cannot_verify_host_key',
+  SshFailure.connect: 'connection_failed',
+};
+
 void main() {
   // The active language is global mutable state; every test here picks its own
   // and leaves the default behind.
@@ -118,10 +136,30 @@ void main() {
     });
 
     test('a missing or empty detail leaves the sentence alone', () {
+      // Compared against each kind's own sentence, looked up from the table by
+      // key. The previous version compared `sshFailureText(kind)` with
+      // `sshFailureText(kind, null)` — the same call twice, since `detail`
+      // defaults to null — and with `sshFailureText(kind, '')`, which the one
+      // implementation that ignores both cannot tell apart.
+      // 逐项与该失败自己的句子比对，句子按键从表中查出。此前那条用的是
+      // `sshFailureText(kind, null)`——由于 `detail` 默认即 null，那是同一次调用；
+      // 以及与 `sshFailureText(kind, '')` 相比——一个把两者都忽略的实现同样能通过。
+      expect(
+        expectedKeys.keys.toSet(),
+        SshFailure.values.toSet(),
+        reason: 'every failure kind needs a sentence pinned here',
+      );
+
       for (final kind in SshFailure.values) {
-        expect(sshFailureText(kind), sshFailureText(kind, ''));
-        expect(sshFailureText(kind), sshFailureText(kind, null));
-        expect(sshFailureText(kind).endsWith(': '), isFalse, reason: '$kind');
+        final label = t(expectedKeys[kind]!);
+        expect(sshFailureText(kind), label, reason: '$kind / no detail');
+        expect(sshFailureText(kind, ''), label, reason: '$kind / empty detail');
+        expect(sshFailureText(kind, null), label, reason: '$kind / null detail');
+        expect(
+          label.contains(': '),
+          isFalse,
+          reason: 'the bare sentence for $kind must carry no separator',
+        );
       }
     });
   });

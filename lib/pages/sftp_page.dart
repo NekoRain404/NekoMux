@@ -9,6 +9,7 @@ import '../models/credential.dart';
 import '../models/file_item.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
+import '../providers/ssh_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/sftp_service.dart';
 import '../widgets/host_key_prompt.dart';
@@ -110,6 +111,21 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       _sftpService = SftpService(
         host: widget.host,
         credential: cred,
+        // Settings → connect timeout, honoured in full — deliberately not
+        // clamped the way the home page's background probe clamps it. The two
+        // cases are opposites: a probe runs against every host on every round
+        // with nobody watching, while this page opens exactly the one session
+        // the user asked for by tapping a host. Clamping here would recreate the
+        // defect being fixed — a user on a slow link who chose 30s would still
+        // be cut off at 4s — and the cost of obeying it is paid once per
+        // attempt, not per tick: a connect happens on open and on retry, both
+        // user-initiated.
+        // 设置 → 连接超时，在这里被完整遵循——刻意**不**像主页后台探测那样钳制。两者
+        // 恰好相反：探测每轮对每台主机执行且无人注视，而本页只打开用户点击主机所请求的
+        // 那一条会话。在此钳制会重新造出正在修复的缺陷——慢链路上的用户设了 30 秒，却
+        // 依然在 4 秒被切断——而遵循它的代价只按次支付，不按 tick 重复：连接只发生在
+        // 打开与重试时，全部由用户发起。
+        connectTimeout: ref.read(connectTimeoutProvider),
         onHostKeyVerify: buildHostKeyVerifier(
           db: db,
           address: widget.host.ipAddress,

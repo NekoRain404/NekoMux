@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../core/app_info.dart';
 import '../core/i18n/strings.dart';
 import '../core/haptics.dart';
 import '../providers/providers.dart';
@@ -190,8 +191,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             SettingsSectionHeader(title: t('about_label')),
             const SettingsInfoTile(
               icon: Icons.info_outline,
-              title: 'NekoMux',
-              sub: 'v1.0.0',
+              title: appName,
+              sub: 'v$appVersion',
             ),
             SettingsInfoTile(
               icon: Icons.code,
@@ -219,44 +220,117 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   /// 除非用户在导出对话框中勾选显式选项，否则凭据不会包含在内；此时载荷携带的只是
   /// 数据库中那个 `'secure_storage'` 占位值——默认情况下密码与私钥都不会进入剪贴板
   /// （审计问题 sec-2）。关闭对话框即不导出：只有明确的选择才会开始导出。
+  ///
+  /// Everything after the dialog can fail — the credential list reads secrets
+  /// out of secure storage, and the clipboard is a platform channel — so the
+  /// build-and-copy runs guarded and reports what went wrong. It used to run
+  /// bare: the future it returned was discarded by the tile's `onTap`, so a
+  /// user whose secure storage was unavailable got no clipboard write, no
+  /// snackbar and no error, however many times they tapped (audit finding).
+  /// 对话框之后的每一步都可能失败——凭据列表要从安全存储读取密钥，剪贴板也是平台
+  /// 通道——因此「构建并复制」整体置于保护之下，并报告失败原因。此前它没有任何保护：
+  /// 它返回的 future 被该行的 `onTap` 丢弃，于是安全存储不可用的用户无论点多少次，
+  /// 都既没有剪贴板内容、也没有提示，更看不到错误（审计问题）。
   Future<void> _exportData() async {
     final includeSecrets = await showExportSecretsDialog(context);
     if (includeSecrets == null || !mounted) return;
 
-    final db = await ref.read(databaseProvider.future);
-    final hosts = await db.query('tb_hosts');
-    final creds = await ref.read(credentialListProvider.future);
-    final snippets = await db.query('tb_snippets');
-    // Key names live in backup_service.dart so export and restore agree, and
-    // what a credential row may carry lives in backup_credentials.dart.
-    // 键名统一定义在 backup_service.dart，保证导出与恢复一致；凭据行允许携带什么
-    // 则定义在 backup_credentials.dart。
-    final json = const JsonEncoder.withIndent('  ').convert(
-      buildExportPayload(
+    try {
+      final db = await ref.read(databaseProvider.future);
+      final hosts = await db.query(BackupSection.hosts.table);
+      // The one step here that can fail on its own: `CredentialListNotifier`
+      // builds by reading every secret out of secure storage, which throws
+      // whenever the platform store is unavailable (the post-restore /
+      // invalidated-keystore case). It sits inside the guard for that reason.
+      // 这里唯一会自行失败的一步：`CredentialListNotifier` 构建时会从安全存储读取每
+      // 一条密钥，平台存储不可用（恢复之后 / 密钥库失效）时必然抛出。它之所以被放进
+      // 保护范围内，正是因为这个。
+      final creds = await ref.read(credentialListProvider.future);
+      final snippets = await db.query(BackupSection.snippets.table);
+      // Settings ride along: the tile says "export all data as JSON" and the
+      // dialog's default is described as covering settings, hosts and
+      // snippets, yet tb_settings used to be left behind — restoring on a new
+      // phone brought back every host but not the theme, language, font size
+      // or connect timeout (audit finding). Added as a section of its own so
+      // nothing already written changes meaning.
+      // 设置一同导出：该行写着「导出所有数据为 JSON」，对话框也把默认导出描述为涵盖
+      // 设置、主机与快捷指令，但 tb_settings 过去被落下——在新手机上恢复会带回全部
+      // 主机，却带不回主题、语言、字号与连接超时（审计问题）。它作为独立分节加入，
+      // 已有内容的含义因此没有任何改变。
+      final settings = await db.query(BackupSection.settings.table);
+      // Key names live in backup_service.dart so export and restore agree, and
+      // what a credential row may carry lives in backup_credentials.dart.
+      // 键名统一定义在 backup_service.dart，保证导出与恢复一致；凭据行允许携带什么
+      // 则定义在 backup_credentials.dart。
+      final payload = buildExportPayload(
         hosts: hosts,
         credentials: backupCredentialRows(
           creds,
           includeSecrets: includeSecrets,
         ),
         snippets: snippets,
-      ),
-    );
-    await Clipboard.setData(ClipboardData(text: json));
-    if (mounted) {
-      // Say which of the two exports this was, so a user who walks away from
-      // the snackbar still knows whether the clipboard can get them back in.
-      // 说明这次是两种导出中的哪一种，即使用户没看到提示，也知道剪贴板里的内容
-      // 能否让自己直接登录回去。
-      _showSnack(
-        includeSecrets
-            ? '${t('export_success')} · ${t('export_secrets_warning')}'
-            : '${t('export_success')} · ${t('export_secrets_omitted')}',
+        settings: settings,
       );
+
+      final json = const JsonEncoder.withIndent('  ').convert(payload);
+      await Clipboard.setData(ClipboardData(text: json));
+      if (mounted) {
+        // Say which of the two exports this was, so a user who walks away from
+        // the snackbar still knows whether the clipboard can get them back in.
+        // 说明这次是两种导出中的哪一种，即使用户没看到提示，也知道剪贴板里的内容
+        // 能否让自己直接登录回去。
+        _showSnack(
+          includeSecrets
+              ? '${t('export_success')} · ${t('export_secrets_warning')}'
+              : '${t('export_success')} · ${t('export_secrets_omitted')}',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack(
+          t('service_action_failed')
+              .replaceAll('{0}', t('export_backup'))
+              .replaceAll('{1}', e.toString()),
+          isError: true,
+        );
+      }
     }
   }
 
   /// Show dialog to paste JSON and restore data.
   /// 弹出对话框以粘贴 JSON 并恢复数据。
+  ///
+  /// The database half of a restore is one transaction; secure storage has no
+  /// transactions at all, and the only safe order is the database first and the
+  /// secrets after it commits.
+  /// 恢复的数据库部分是一个事务，安全存储则根本没有事务可言；唯一安全的顺序是先
+  /// 数据库、待其提交后再写密钥。
+  ///
+  /// Secrets used to be written *inside* the transaction, so a later row the
+  /// schema rejected — a host missing its `NOT NULL` alias, say — rolled the
+  /// rows back while the passwords stayed overwritten: the page said "restore
+  /// failed" although every credential whose id was in the backup had already
+  /// lost its original password, and an id with no row left a secret nothing
+  /// would ever clean up (audit finding). Collecting the pairs while the
+  /// transaction runs and applying them only once it has committed makes that
+  /// sequence impossible: a rollback now means no secret was written, and no
+  /// applied secret can exist without the row that points at it.
+  /// 密钥过去是在事务*内部*写入的，于是之后但凡有一行被 schema 拒绝——例如主机缺少
+  /// `NOT NULL` 的 alias——数据行会回滚，密码却已被覆写：页面显示「恢复失败」，可
+  /// 备份中出现过的每个凭据都已丢失原密码，而没有对应行的 id 更留下永远无人清理的
+  /// 密钥（审计问题）。在事务进行期间只收集这些 (id, 密钥) 对、等它提交之后才写入，
+  /// 这一连串后果便不可能再发生：回滚即意味着一个密钥都没写，而任何已写入的密钥都
+  /// 必然有指向它的行。
+  ///
+  /// The reverse failure — committed rows, then a secret write fails — is
+  /// deliberately *not* compensated by deleting the secrets already written.
+  /// Such a delete cannot bring back the value those writes overwrote; it only
+  /// destroys the one secret that now matches the committed row, turning a
+  /// working credential into a dead one. What could not be written is reported
+  /// instead.
+  /// 反向的失败——行已提交、随后某个密钥写入失败——刻意*不*用删除已写密钥来补偿。
+  /// 删除找不回那些写入所覆写的值；它只会销毁当下与已提交行相符的那一个密钥，把还能
+  /// 用的凭据变成废的。这里的做法是如实报告没能写入的部分。
   Future<void> _restoreData() async {
     final raw = await showRestoreBackupDialog(context);
     if (raw == null || !mounted) return;
@@ -268,16 +342,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       final credentials = readBackupRows(payload, BackupSection.credentials);
       final hosts = readBackupRows(payload, BackupSection.hosts);
       final snippets = readBackupRows(payload, BackupSection.snippets);
+      // The one section that may legitimately be absent — a payload written
+      // before settings were exported has none and must still restore — which is
+      // why the reader has to be told the section rather than assume every one
+      // is mandatory.
+      // 唯一可以合法缺席的分节——设置被导出之前写出的载荷没有它，且必须仍能恢复——这
+      // 正是读取时必须指明分节、而不能假定每一节都必需的原因。
+      final settings = readBackupRows(payload, BackupSection.settings);
 
       final db = await ref.read(databaseProvider.future);
-      // One transaction for all three tables: either the whole restore
-      // commits, or nothing does.
-      // 三张表共用同一事务：要么全部写入，要么全部回滚。
+      // Secrets asked for by this payload, gathered here and written only after
+      // the transaction below has committed. Nothing in this map is touched if
+      // it rolls back.
+      // 本载荷要求的密钥，在此收集，只有下面的事务提交之后才写入。若事务回滚，这个
+      // map 中的内容不会被任何代码用到。
+      final pendingSecrets = <String, String>{};
+      // One transaction for every table, settings included: either the whole
+      // restore commits, or nothing does.
+      // 所有数据表共用同一事务（设置表也在内）：要么全部写入，要么全部回滚。
       await db.transaction((txn) async {
         for (final row in credentials) {
           final id = row['id'] as String?;
           if (id == null || id.isEmpty) {
-            throw FormatException('Invalid credential id');
+            throw const FormatException('Invalid credential id');
           }
           // A row from an export without secrets carries the placeholder, not a
           // password, so it restores the metadata and leaves whatever secret
@@ -287,7 +374,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           // 密钥保持不变——占位值绝不会覆盖真正的凭据。
           final secret = backupSecretToStore(row);
           if (secret != null) {
-            await SecureStorage.saveCredential(id, secret);
+            pendingSecrets[id] = secret;
           }
           await txn.insert(
             BackupSection.credentials.table,
@@ -313,13 +400,64 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
         }
+        // Merged key by key, exactly like the sections above: rows the backup
+        // does not carry are left alone, so restoring an old backup cannot
+        // silently wipe a setting it never knew about.
+        // 与上面各分节一样逐键合并：备份没有携带的行保持原样，因此恢复一份旧备份不会
+        // 悄悄抹掉它根本不知道的设置。
+        for (final row in settings) {
+          await txn.insert(
+            BackupSection.settings.table,
+            row,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
       });
+
+      // Committed: the rows are on disk and every one of them points at the
+      // placeholder. Only now may the secrets be written, and a failure here
+      // leaves the already-written ones alone (see above) while the rest are
+      // reported.
+      // 已提交：数据行已经落盘，且每一行都指向占位值。此刻才允许写入密钥；这里失败时，
+      // 已写入的密钥保持原样（原因见上），其余部分如实报告。
+      var failedSecrets = 0;
+      var secretError = '';
+      for (final entry in pendingSecrets.entries) {
+        try {
+          await SecureStorage.saveCredential(entry.key, entry.value);
+        } catch (e) {
+          failedSecrets++;
+          secretError = secretError.isEmpty ? e.toString() : secretError;
+        }
+      }
 
       ref.invalidate(hostListProvider);
       ref.invalidate(credentialListProvider);
       ref.invalidate(snippetListProvider);
-      if (mounted) {
+      // Theme, language, font size and connect timeout all come from this
+      // provider, and the theme and language notifiers watch it, so one
+      // invalidation carries the restored values through the whole app.
+      // 主题、语言、字号与连接超时都来自这个 provider，而主题与语言通知器都 watch
+      // 它，因此一次失效即可把恢复出来的取值带到整个应用。
+      if (settings.isNotEmpty) {
+        ref.invalidate(settingsProvider);
+      }
+      if (!mounted) return;
+      if (failedSecrets == 0) {
         _showSnack(t('restore_success'));
+      } else {
+        // The rows are in place and some secrets are not: saying only
+        // "restored" would hide credentials that cannot connect, and saying
+        // only "failed" would hide that everything else came back.
+        // 数据行已经就位，但有一部分密钥没有写进去：只说「已恢复」会掩盖连不上的凭据，
+        // 只说「失败」则会掩盖其余全部已经回来的事实。
+        final unwritten = t('service_action_failed')
+            .replaceAll('{0}', t('credentials'))
+            .replaceAll(
+              '{1}',
+              '$failedSecrets/${pendingSecrets.length} — $secretError',
+            );
+        _showSnack('${t('restore_success')} · $unwritten', isError: true);
       }
     } catch (e) {
       if (mounted) {
@@ -355,11 +493,59 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     // 每个列表做一次批量删除，而不是循环 deleteItem：逐条调用各自刷新，而主机
     // 通知器又 watch 凭据通知器，于是清空 N 条凭据会让主机列表重建 N 次
     // （审计问题 rob-7）。密钥的清理在凭据的批量方法内部完成。
-    await ref.read(hostListProvider.notifier).clearAll();
-    await ref.read(credentialListProvider.notifier).clearAll();
-    await ref.read(snippetListProvider.notifier).clearAll();
-    if (mounted) {
+    //
+    // Each list is cleared on its own and its outcome is kept, because this
+    // wipe is irreversible and the dialog promises all three. Credential
+    // clearing deletes secrets through `SecureStorage`, which throws rather
+    // than reports — and nothing above catches it. Unguarded, that throw left
+    // the hosts gone, the credentials and every snippet alive, no success
+    // snackbar, and an unhandled async error: the user got neither a success
+    // nor a failure message for an irreversible action (audit finding). The
+    // restore path reported on exactly this kind of failure; this one did not.
+    // 每个列表单独清理并记下各自结果，因为这次清空不可撤销，而对话框承诺的是三样都
+    // 清掉。凭据清理会经由 `SecureStorage` 删除密钥，它是抛出异常而不是报告失败——且
+    // 上层无人捕获。没有保护时，那次抛出会让主机已经没了、凭据与全部快捷指令却还在、
+    // 成功提示不出现，还留下一个未处理的异步错误：用户对一个不可撤销的操作既没看到成功
+    // 也没看到失败（审计问题）。恢复流程对同类失败是有报告的，这里此前没有。
+    final failed = <String>[];
+    var errorDetail = '';
+    Future<void> wipe(String label, Future<void> Function() clear) async {
+      try {
+        await clear();
+      } catch (e) {
+        // Keep going: the user asked for everything to go, and a failure in
+        // one list is no reason to abandon the others. Report the first
+        // detail, which is the one that explains the earliest failure.
+        // 继续往下清：用户要的是全部清掉，其中一个列表失败并不构成放弃其余列表的
+        // 理由。只保留第一条细节——它解释的是最早那次失败。
+        failed.add(label);
+        if (errorDetail.isEmpty) errorDetail = e.toString();
+      }
+    }
+
+    await wipe(
+      t('my_hosts'),
+      () => ref.read(hostListProvider.notifier).clearAll(),
+    );
+    await wipe(
+      t('credentials'),
+      () => ref.read(credentialListProvider.notifier).clearAll(),
+    );
+    await wipe(
+      t('snippets'),
+      () => ref.read(snippetListProvider.notifier).clearAll(),
+    );
+    if (!mounted) return;
+    if (failed.isEmpty) {
       _showSnack(t('all_data_cleared'));
+    } else {
+      // Names the lists that survived instead of claiming a clean sweep: a
+      // partial wipe must not read like a complete one.
+      // 点明幸存下来的是哪些列表，而不是宣称已经清干净：清了一半不能读起来像全清了。
+      final failure = t(
+        'service_action_failed',
+      ).replaceAll('{0}', failed.join(', ')).replaceAll('{1}', errorDetail);
+      _showSnack(failure, isError: true);
     }
   }
 

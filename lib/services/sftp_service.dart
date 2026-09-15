@@ -4,6 +4,7 @@ import '../models/host.dart';
 import '../models/credential.dart';
 import '../models/file_item.dart';
 import 'host_key_verifier.dart';
+import 'ssh_service.dart';
 
 /// SFTP file browser backed by dartssh2's SSH/SFTP protocol implementation.
 /// 基于 dartssh2 的 SSH/SFTP 协议实现的 SFTP 文件浏览器。
@@ -42,11 +43,41 @@ class SftpService {
   /// Optional host key verification callback.
   final Future<bool> Function(String fingerprint)? onHostKeyVerify;
 
+  /// Connect timeout applied when a caller does not pass one.
+  /// 调用方未传入时采用的连接超时。
+  ///
+  /// This is a *fallback*, not the user's setting. Settings → connect timeout is
+  /// read where the connection is built (see `connectTimeoutProvider` in
+  /// `providers/ssh_provider.dart`) and passed in explicitly, so the SFTP page
+  /// honours the number the user chose while anything not wired behaves exactly
+  /// as it did before that provider existed. It is [SshConnection]'s own
+  /// fallback rather than a second copy of the number, so the two connection
+  /// paths cannot drift apart.
+  /// 这是**兜底值**，不是用户的设置。「设置 → 连接超时」在构造连接处读取
+  /// （见 `providers/ssh_provider.dart` 中的 `connectTimeoutProvider`）并显式传入，
+  /// 因此 SFTP 页面遵循用户选定的数字，而未接线的路径与该 provider 出现之前完全一致。
+  /// 它直接引用 [SshConnection] 的兜底值，而不是再抄一遍这个数字，两条连接路径因此
+  /// 不可能漂移。
+  ///
+  /// Before this was honoured, SFTP was the one connection path that ignored the
+  /// setting outright: a 3s preference still stalled the file manager for 10s,
+  /// and a 30s one let the terminal connect at 25s while the file manager had
+  /// already reported failure.
+  /// 在本设置被遵循之前，SFTP 是唯一完全无视它的连接路径：设成 3 秒，文件管理器仍会
+  /// 卡满 10 秒；设成 30 秒，终端在 25 秒才连上，而文件管理器早已报错。
+  static const Duration defaultConnectTimeout =
+      SshConnection.defaultConnectTimeout;
+
+  /// Timeout for establishing the TCP/SSH session.
+  /// 建立 TCP/SSH 会话的超时时间。
+  final Duration connectTimeout;
+
   /// Creates a new SFTP service for the given [host] and [credential].
   /// 使用给定的 [host] 和 [credential] 创建新的 SFTP 服务。
   SftpService({
     required this.host,
     required this.credential,
+    this.connectTimeout = defaultConnectTimeout,
     this.onHostKeyVerify,
   });
 
@@ -72,10 +103,15 @@ class SftpService {
     SftpClient? sftp;
 
     try {
+      // [connectTimeout] is the caller's — the page passes the user's setting —
+      // and defaults to [defaultConnectTimeout] only for a construction that
+      // passes nothing.
+      // [connectTimeout] 来自调用方——页面传入的是用户的设置；只有什么都没传的构造
+      // 才使用 [defaultConnectTimeout]。
       socket = await SSHSocket.connect(
         host.ipAddress,
         host.port,
-        timeout: const Duration(seconds: 10),
+        timeout: connectTimeout,
       );
 
       // Torn down while the TCP handshake was pending. This socket is all the

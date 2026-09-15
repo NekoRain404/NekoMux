@@ -87,8 +87,21 @@ void main() {
       final conn = newConnection();
       addTearDown(conn.dispose);
 
-      final Future<CommandResult> Function(String) run = conn.runCommand;
-      expect(run, isNotNull);
+      // Asserted on the tear-off's *runtime type*, which carries the declared
+      // return type — so this fails the moment `runCommand` is changed back to
+      // handing out a bare string. The previous assertion was `isNotNull` on a
+      // non-nullable tear-off: it could not fail, because the only way to make
+      // it fail is to stop the file compiling.
+      // 断言的是 tear-off 的**运行期类型**，它携带了声明的返回类型——因此一旦
+      // `runCommand` 改回返回裸字符串，本测试立刻失败。此前的断言是对非空 tear-off
+      // 做 `isNotNull`：它不可能失败，因为唯一能让它失败的办法是让本文件无法编译。
+      expect(
+        conn.runCommand,
+        isA<Future<CommandResult> Function(String)>(),
+        reason:
+            'runCommand must hand back a CommandResult: the exit status it '
+            'carries is what lets a caller judge whether the command worked',
+      );
     });
 
     test('runCommand reports the not-connected state as an exception', () async {
@@ -142,7 +155,36 @@ void main() {
       final conn = newConnection();
       conn.dispose();
 
-      await expectLater(conn.runCommand('true'), throwsA(isA<Exception>()));
+      // Pinned to the code the guard actually raises. `throwsA(isA<Exception>())`
+      // accepted *any* exception — including the `TypeError` a disposed field
+      // being dereferenced throws — so it would have stayed green if dispose()
+      // had left the object in a state the command path cannot handle. Callers
+      // distinguish "no session" from everything else by this code, so the code
+      // is what is asserted.
+      // 固定在守卫实际抛出的编码上。`throwsA(isA<Exception>())` 接受**任何**异常
+      // ——包括解引用已释放字段所抛的 `TypeError`——因此若 dispose() 让对象进入了
+      // 命令路径无法处理的状态，它照样通过。调用方正是靠这个编码把「没有会话」与其它
+      // 一切区分开，所以要断言的就是这个编码。
+      await expectLater(
+        conn.runCommand('true'),
+        throwsA(
+          isA<SshException>().having(
+            (e) => e.kind,
+            'kind',
+            SshFailure.notConnected,
+          ),
+        ),
+      );
+      await expectLater(
+        conn.executeCommand('true'),
+        throwsA(
+          isA<SshException>().having(
+            (e) => e.kind,
+            'kind',
+            SshFailure.notConnected,
+          ),
+        ),
+      );
     });
   });
 

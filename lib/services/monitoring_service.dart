@@ -68,11 +68,18 @@ class MonitoringService {
     return ((totalDelta - idleDelta) / totalDelta * 100).clamp(0.0, 100.0);
   }
 
-  static double memoryUsagePercentFromFree(String output) {
+  static double? memoryUsagePercentFromFree(String output) {
     final memory = parseFree(output);
+    // Null, not 0.0: this method's whole job is to turn a reading into a
+    // percentage, and it has no reading to turn. Returning 0.0 here is what
+    // made a failed parse indistinguishable from an idle machine.
+    // 返回 null 而不是 0.0：本方法的职责就是把一个读数换算成百分比，而它没有读数可换算。
+    // 在这里返回 0.0，正是「解析失败」与「机器空闲」无从区分的原因。
+    if (memory.isEmpty) return null;
+
     final total = memory[0];
     final used = memory[1];
-    if (total <= 0) return 0;
+    if (total <= 0) return null;
     return (used / total * 100).clamp(0.0, 100.0);
   }
 
@@ -98,9 +105,28 @@ class MonitoringService {
   static List<int> parseFree(String output) {
     for (final line in output.split('\n')) {
       final parts = line.trim().split(RegExp(r'\s+'));
-      // Need a label plus at least total/used/free.
-      // 至少需要标签 + total/used/free 三个数字。
-      if (parts.length < 4) continue;
+      // A label plus at least FOUR numbers — one more than total/used/free.
+      //
+      // That fourth number is what tells the memory row apart from the swap
+      // row, and it matters: `free` prints them in a fixed order with the same
+      // three leading columns, so "the first labelled row with three integers"
+      // is the memory row only while a memory row is present. An output that
+      // carries a swap row and no memory row — a truncated or unusual `free` —
+      // used to return the *swap* figures, which `memoryUsagePercentFromFree`
+      // turned into a perfectly plausible 20.2%. A failed read that renders as
+      // a number is the exact failure mode this parser keeps being fixed for.
+      // Both real rows pass: modern `free` prints six numbers for memory
+      // (`total used free shared buff/cache available`) and three for swap.
+      // 需要标签 + **四个**数字，比 total/used/free 多一个。
+      //
+      // 这第四个数字正是内存行与交换行的分界，而它是要紧的：`free` 以固定顺序打印它们，
+      // 前三个列完全相同，因此「第一行带标签且含三个整数的行」只有在内存行存在时才等于
+      // 内存行。当输出里有交换行却没有内存行时（截断或非典型的 `free`），这里会返回
+      // **交换区**的数字，经 `memoryUsagePercentFromFree` 变成完全可信的 20.2%。读取失败
+      // 却渲染成一个数字，正是这个解析器反复被修的失败模式。两行真实数据都能通过：现代
+      // `free` 为内存打印六个数（total used free shared buff/cache available），为交换区
+      // 打印三个。
+      if (parts.length < 5) continue;
       // A numeric first token cannot be a row label (e.g. wrap-around output).
       // 首个 token 为数字时不是行标签。
       if (int.tryParse(parts[0]) != null) continue;
@@ -113,7 +139,14 @@ class MonitoringService {
       return [total, used, free];
     }
 
-    return [0, 0, 0];
+    // No memory row found. `[0, 0, 0]` is deliberately NOT returned: through
+    // `memoryUsagePercentFromFree` it becomes a believable `0.0%`, which is a
+    // failed read wearing the costume of a measurement. An empty list is
+    // unmistakable, and the callers already treat it as a probe failure.
+    // 没有找到内存行。刻意**不**返回 `[0, 0, 0]`：经 `memoryUsagePercentFromFree`
+    // 它会变成可信的 `0.0%`——即一次失败读取披上了测量值的外衣。空列表不会被误认，
+    // 而调用方已将其视为探测失败。
+    return const [];
   }
 
   // ===========================================================================
