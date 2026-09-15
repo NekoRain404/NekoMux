@@ -351,14 +351,26 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
   /// Puts a finished task back in line with its byte count and diagnosis reset.
   /// 把一个已结束的任务放回队列，并重置其字节计数与诊断信息。
   ///
-  /// It keeps its place at the back of the list rather than jumping the queue,
-  /// and it is a no-op for a task that has not stopped or no longer exists.
-  /// 它留在列表末尾，不插队；对尚未停止或不复存在的任务是空操作。
+  /// It goes to the back of the list rather than jumping the queue, and it is a
+  /// no-op for a task that has not stopped or no longer exists.
+  /// 它排到列表末尾，不插队；对尚未停止或不复存在的任务是空操作。
+  ///
+  /// To the back, and not back to its old index, which is what the code used to
+  /// do while this sentence said otherwise. The queue's whole contract is first
+  /// enqueued, first run ([_nextQueued] scans in list order), and a retry is a new
+  /// attempt at a transfer, not a continuation of the old one: keeping the index
+  /// let a task the user retried overtake tasks that had been waiting longer, and
+  /// the row visibly moves to the end of the sheet, so the list the user is
+  /// looking at is the order things will actually run in.
+  /// 排到末尾，而不是回到原来的位置——代码从前做的正是后者，而这句话说的是前者。队列的
+  /// 全部契约就是先入队先运行（[_nextQueued] 按列表顺序扫描），而重试是对一次传输发起的
+  /// **新**尝试，不是旧尝试的延续：保留原索引会让用户刚重试的任务超过等待更久的任务，
+  /// 而该行在面板中确实会移到末尾，因此用户看到的那份列表就是实际的运行顺序。
   void retry(String id) {
     final task = _taskById(id);
     if (task == null || !task.isTerminal) return;
     _pendingBytes.remove(id);
-    _replaceCurrent(
+    _moveToEnd(
       id,
       (t) => t.copyWith(
         status: TransferStatus.queued,
@@ -509,14 +521,26 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
         return;
       }
 
-      await runner.move(
+      final outcome = await runner.move(
         _taskById(task.id) ?? task,
         signal,
         (bytes) => _reportProgress(task.id, bytes),
       );
+      // From what the I/O did, not from the flag that asked it to stop. `_run`
+      // holds `running` across the runner's `finally`, which is real file I/O —
+      // cancelling the subscription, closing the sink — so a cancel that lands in
+      // that window after the last byte arrived used to report a *complete* file
+      // as cancelled, and the row's Save action is gated on `done`: the user lost
+      // the only way to publish bytes that had all arrived.
+      // 依据是 I/O 实际做了什么，而不是那个要求它停止的标志。`_run` 会在 runner 的
+      // `finally` 期间保持 `running`，而那是真实的文件 I/O——取消订阅、关闭接收端——因此
+      // 在最后一个字节到达之后落在这个窗口里的取消，此前会把一份**完整**的文件报成已取消，
+      // 而该行的「保存」操作以 `done` 为前提：用户就此失去了交付全部已到达字节的唯一途径。
       _finish(
         task.id,
-        signal.isCancelled ? TransferStatus.cancelled : TransferStatus.done,
+        outcome == TransferOutcome.completed
+            ? TransferStatus.done
+            : TransferStatus.cancelled,
       );
     } catch (e) {
       if (signal.isCancelled) {
@@ -553,9 +577,9 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
   /// This is the answer to "progress must not rebuild the world": the callback
   /// runs per chunk, but it writes to [_pendingBytes] and returns, and only a
   /// publication builds a new list. Between publications nothing is allocated
-  /// for the UI and no listener is notified. The terminal transition flushes
-  /// whatever is still pending, so a coalesced-away value can never leave a
-  /// finished row showing less than it moved.
+  /// for the UI and no listener is notified. Both terminal transitions — [_finish]
+  /// and [_fail] — carry whatever is still pending, so a coalesced-away value can
+  /// never leave a stopped row showing less than it moved.
   /// 这就是「进度不得反复重建整个世界」的答案：回调按块运行，但它只写入
   /// [_pendingBytes] 就返回，只有发布才会构建新列表。两次发布之间不为界面分配任何东西，
   /// 也不通知任何监听者。终止跃迁会把仍然待发的值刷出去，因此被合并掉的值绝不会让一行
@@ -624,7 +648,15 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
   /// 说出当时正在尝试的操作。
   void _fail(String id, Object error, String fallback) {
     _lastProgressPublish = null;
-    _pendingBytes.remove(id);
+    // Carried over exactly as in [_finish], and for the same reason: the last
+    // *published* count lags by up to one progress interval, so a transfer that
+    // fails inside its last 120 ms used to be reported as having moved less than
+    // it did — a row that failed while displaying a byte count it had already
+    // passed. The bytes are real whether the transfer ended well or badly.
+    // 与 [_finish] 完全相同的结转方式，理由也相同：最后一次**发布**的计数最多滞后一个
+    // 进度间隔，因此在最后 120 ms 内失败的传输，此前会被报告为搬运得比实际少——一行失败
+    // 的记录会显示一个它早已越过的字节数。无论传输结束得好还是坏，这些字节都是真实的。
+    final pending = _pendingBytes.remove(id);
 
     final classified = error is SftpException
         ? error.kind.name
@@ -632,7 +664,12 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
         ? TransferErrorCode.localIo
         : fallback;
     final detail = error is SftpException ? error.detail : error.toString();
-    _replaceCurrent(id, (t) => t.withError(classified, detail));
+    _replaceCurrent(
+      id,
+      (t) => t
+          .copyWith(transferredBytes: pending ?? t.transferredBytes)
+          .withError(classified, detail),
+    );
   }
 
   /// The code to fall back on for an unexpected failure moving bytes in
@@ -663,6 +700,25 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
     if (index < 0) return;
     final next = List<TransferTask>.of(current);
     next[index] = update(current[index]);
+    state = next;
+  }
+
+  /// Replaces [id] and moves it to the end of the list in one publication.
+  /// 替换 [id] 并在同一次发布中把它移到列表末尾。
+  ///
+  /// One publication rather than two, so no listener ever sees the task gone from
+  /// its old place before it exists in its new one — the sheet would drop the row
+  /// for a frame.
+  /// 一次发布而不是两次，因此任何监听者都不会看到「任务已离开原位但尚未出现在新位置」
+  /// 的中间状态——面板会因此丢帧少画一行。
+  void _moveToEnd(String id, TransferTask Function(TransferTask) update) {
+    if (!_alive) return;
+    final current = state;
+    final index = current.indexWhere((t) => t.id == id);
+    if (index < 0) return;
+    final next = List<TransferTask>.of(current)
+      ..removeAt(index)
+      ..add(update(current[index]));
     state = next;
   }
 

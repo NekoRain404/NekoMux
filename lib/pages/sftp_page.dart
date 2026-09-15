@@ -230,6 +230,22 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// 只有最新的请求可以提交结果，因此较早发出、最后才返回的列举既不能覆盖它，也不能
   /// 在更新的加载仍在进行时清掉转圈——正是那个状态让路径栏与列表条目指向两个不同的目录。
   Future<void> _loadDirectory(String path) async {
+    // Nothing is connected when the page is showing its own error state — the
+    // credential backing this host was deleted, or the connection never opened —
+    // and the app bar draws refresh over that page anyway. The null check below
+    // used to throw a `TypeError` there, which the generic `catch` turned into
+    // "List failed: Null check operator used on a null value": the one message
+    // that told the user what to fix was replaced by one that says nothing.
+    // Leaving the error state alone is the honest answer — the reason is already
+    // on screen, and Retry is the way out of it.
+    // 当页面正显示自身错误状态时（本主机所依赖的凭据被删除，或连接从未建立），什么都没
+    // 连接上——而应用栏在那张错误页上照样画着刷新按钮。下面的空检查此前会在此抛出
+    // `TypeError`，由泛化的 `catch` 转成「列举失败: Null check operator used on a null
+    // value」：唯一告诉用户该修什么的那句话，被一句什么都没说的替代了。保持错误状态不变
+    // 才是诚实的答案——原因已经在屏幕上，而「重试」是离开它的出口。
+    final service = _sftpService;
+    if (service == null) return;
+
     final request = _directory.begin(path);
     final changesDirectory = path != _directory.shownPath;
 
@@ -242,7 +258,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     });
 
     try {
-      final entries = await _sftpService!.listDirectory(path);
+      final entries = await service.listDirectory(path);
       if (!mounted || !_directory.commitLoaded(request)) return;
       entries.sort(_compareEntries);
       setState(() {

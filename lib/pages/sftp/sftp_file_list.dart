@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/strings.dart';
+import '../../core/theme/app_fonts.dart';
 import '../../models/file_item.dart';
 import '../../widgets/app_ui.dart';
 import 'sftp_file_visuals.dart';
@@ -187,10 +188,16 @@ class SftpFileList extends StatelessWidget {
                   file.permissions,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
+                  // The bundled mono face through its one accessor, not the
+                  // generic family name: `AppFonts.monoText` is where the family
+                  // lives, and a literal here is a call site that would keep
+                  // rendering in the fallback face if the font were ever renamed.
+                  // 经由唯一的访问器使用随包等宽字体，而不是通用族名：
+                  // `AppFonts.monoText` 才是族名的出处，而这里的字面量会在字体改名时
+                  // 静默地继续用回退字体渲染。
+                  style: AppFonts.monoText(
                     color: cs.onSurface.withValues(alpha: 0.36),
                     fontSize: 11,
-                    fontFamily: 'monospace',
                   ),
                 ),
               ),

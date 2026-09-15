@@ -129,6 +129,29 @@ class TransferLocalIoException implements Exception {
   String toString() => detail;
 }
 
+/// How a transfer ended, as reported by [TransferRunner] rather than guessed by
+/// the caller.
+/// 一次传输如何结束——由 [TransferRunner] 报告，而不是由调用方猜测。
+///
+/// The distinction exists because a cancel and an end can arrive in either order,
+/// and the *flag* saying "the user asked to stop" is not the same fact as "the
+/// I/O stopped". A cancel that lands after the last byte was written but before
+/// the sink was closed leaves a complete file behind, and the row that says
+/// "cancelled" about it also withholds the only action that could publish it.
+/// 这一区分存在的原因是：取消与结束可能以任意顺序到达，而「用户要求停止」这个**标志**
+/// 与「I/O 已经停止」并不是同一个事实。在最后一个字节写完、接收端尚未关闭之间落下的取消，
+/// 留下的是一份完整的文件，而把它标记为「已取消」的那一行，同时也拿掉了唯一能交付它的
+/// 操作。
+enum TransferOutcome {
+  /// The bytes ran out on their own: the source ended, or the stream did.
+  /// 字节自己走到了尽头：数据源结束，或流结束。
+  completed,
+
+  /// The I/O was stopped before that, which is what a cancel arranges.
+  /// I/O 在此之前被停住，这正是取消所安排的结果。
+  stopped,
+}
+
 /// Moves one task's bytes, and can be stopped part way.
 /// 搬运一个任务的字节，并且可以中途停止。
 ///
@@ -173,7 +196,13 @@ class TransferRunner {
 
   /// Moves the bytes for [task] in whichever direction it goes.
   /// 按 [task] 的方向搬运字节。
-  Future<void> move(
+  ///
+  /// The [TransferOutcome] says how it ended, which is what a caller must use to
+  /// decide between "done" and "cancelled" — see that enum for why its own
+  /// cancel flag is not a substitute.
+  /// 返回的 [TransferOutcome] 说明它是如何结束的，调用方必须据此在「已完成」与「已取消」
+  /// 之间做选择——原因见该枚举，它自己的取消标志并不能替代这一点。
+  Future<TransferOutcome> move(
     TransferTask task,
     TransferCancelSignal signal,
     void Function(int bytes) onProgress,
@@ -201,7 +230,17 @@ class TransferRunner {
   /// SFTP channel is still being opened.
   /// 最初的暂停正是让整个文件不进内存的原因：没有它，控制器会在 SFTP 通道仍在打开时
   /// 缓冲文件系统能吐出的每一块。
-  Future<void> upload(
+  ///
+  /// "It ended" is read from the *source* reaching its end, not from the cancel
+  /// flag: closing the source is how a cancel stops an upload, and the writer
+  /// cannot tell the two apart — both look like an end of stream from where it
+  /// sits. A cancel that lands after the last byte was read therefore still
+  /// reports [TransferOutcome.completed], which is the truth about the bytes.
+  /// 「它结束了」的判据是**数据源**走到了尽头，而不是取消标志：关闭数据源正是取消停止
+  /// 上传的方式，而写入器分不出这两者——从它所在的位置看，两者都是流结束。因此，在最后
+  /// 一个字节被读出之后落下的取消，仍然上报 [TransferOutcome.completed]，这是关于字节
+  /// 的真相。
+  Future<TransferOutcome> upload(
     TransferTask task,
     TransferCancelSignal signal,
     void Function(int bytesWritten) onProgress,
@@ -213,9 +252,13 @@ class TransferRunner {
 
     final controller = StreamController<Uint8List>();
     Object? readError;
+    var sourceEnded = false;
     final source = File(localPath).openRead().listen(
       (chunk) => controller.add(_asBytes(chunk)),
-      onDone: () => _closeController(controller),
+      onDone: () {
+        sourceEnded = true;
+        _closeController(controller);
+      },
       onError: (Object e, StackTrace _) {
         // Never forwarded to the controller. dartssh2's writer installs no error
         // handler on the stream it is given: an error would be an unhandled async
@@ -258,6 +301,7 @@ class TransferRunner {
     if (readError != null) {
       throw TransferLocalIoException(readError.toString());
     }
+    return sourceEnded ? TransferOutcome.completed : TransferOutcome.stopped;
   }
 
   /// Writes the server's bytes to the local file.
@@ -268,7 +312,16 @@ class TransferRunner {
   /// no further READ is issued and no handle is left open.
   /// 取消订阅就是停止动作，而且是真正的停止：服务的生成器在取消时会执行其 `finally`，
   /// 关闭 `SftpFile`——不会再发出 READ，也不会留下打开的句柄。
-  Future<void> download(
+  ///
+  /// The outcome is taken from the stream's own end rather than from the cancel
+  /// flag, and it is taken *before* the `finally` below: those two awaits are real
+  /// file I/O — cancelling the subscription, closing the sink — and a cancel
+  /// landing inside them must not relabel a download that had already received
+  /// every byte it was ever going to receive.
+  /// 结束方式取自流自身的结束，而不是取消标志，而且是在下面的 `finally` **之前**取定的：
+  /// 那两个 await 是真实的文件 I/O——取消订阅、关闭接收端——落在它们之中的取消，绝不能
+  /// 重新标记一次已经收完它应有全部字节的下载。
+  Future<TransferOutcome> download(
     TransferTask task,
     TransferCancelSignal signal,
     void Function(int bytesRead) onProgress,
@@ -281,6 +334,8 @@ class TransferRunner {
     final sink = File(localPath).openWrite();
     final finished = Completer<void>();
     StreamSubscription<Uint8List>? subscription;
+    var reachedEnd = false;
+    late TransferOutcome outcome;
 
     signal.onCancel = () {
       if (!finished.isCompleted) finished.complete();
@@ -294,6 +349,7 @@ class TransferRunner {
           if (!finished.isCompleted) finished.completeError(e, st);
         },
         onDone: () {
+          reachedEnd = true;
           if (!finished.isCompleted) finished.complete();
         },
         cancelOnError: true,
@@ -303,6 +359,9 @@ class TransferRunner {
       // so there is exactly one place the transfer can unwind from.
       // 要么流结束了，要么用户要求停止；两者都汇到这里，因此传输只有一处收尾。
       await finished.future;
+      outcome = reachedEnd
+          ? TransferOutcome.completed
+          : TransferOutcome.stopped;
     } finally {
       signal.onCancel = null;
       // Unconditional: after a cancellation this is what stops the read, and
@@ -314,6 +373,7 @@ class TransferRunner {
       // 让磁盘写满或权限失败浮现出来。成功时它只是刷盘。
       await sink.close();
     }
+    return outcome;
   }
 }
 

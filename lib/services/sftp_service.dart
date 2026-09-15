@@ -1,10 +1,20 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import '../models/host.dart';
 import '../models/credential.dart';
 import '../models/file_item.dart';
 import 'host_key_verifier.dart';
+import 'sftp_failure.dart';
+import 'sftp_guards.dart';
 import 'ssh_service.dart';
+
+// The failure vocabulary is re-exported, not redefined: it moved to its own file
+// when this one outgrew the 800-line limit, and everything that already imports
+// `services/sftp_service.dart` for `SftpException` keeps working untouched.
+// 失败词汇是**重新导出**而非重新定义：本文件超出 800 行上限时它被移到自己的文件，
+// 而所有为了 `SftpException` 导入 `services/sftp_service.dart` 的地方都无需改动。
+export 'sftp_failure.dart';
 
 /// SFTP file browser backed by dartssh2's SSH/SFTP protocol implementation.
 /// 基于 dartssh2 的 SSH/SFTP 协议实现的 SFTP 文件浏览器。
@@ -72,12 +82,26 @@ class SftpService {
   /// 建立 TCP/SSH 会话的超时时间。
   final Duration connectTimeout;
 
+  /// How long a streaming transfer may go without moving a byte before it is
+  /// failed.
+  /// 流式传输在多少个字节都没动的情况下被判定为失败的时间。
+  ///
+  /// A parameter rather than a bare constant so a test can drive the deadline in
+  /// milliseconds instead of waiting half a minute for it; the app passes
+  /// nothing and gets [defaultTransferStallTimeout]. What it is *for* is
+  /// documented at [uploadStream] and [downloadStream].
+  /// 做成参数而不是直接使用常量，是为了让测试能以毫秒为单位驱动期限，而不必等上
+  /// 半分钟；应用什么都不传，得到的就是 [defaultTransferStallTimeout]。它的用途见
+  /// [uploadStream] 与 [downloadStream] 的说明。
+  final Duration stallTimeout;
+
   /// Creates a new SFTP service for the given [host] and [credential].
   /// 使用给定的 [host] 和 [credential] 创建新的 SFTP 服务。
   SftpService({
     required this.host,
     required this.credential,
     this.connectTimeout = defaultConnectTimeout,
+    this.stallTimeout = defaultTransferStallTimeout,
     this.onHostKeyVerify,
   });
 
@@ -324,40 +348,82 @@ class SftpService {
   ///
   /// It is not instantaneous, and the bound is worth stating because it is what a
   /// caller waits on: an `async*` generator only unwinds at a suspension point, so
-  /// a cancel lands when control next reaches the `yield*` — in practice after the
-  /// reads already in flight (dartssh2 pipelines them) have been answered. No new
-  /// READ is issued after that. Measured against a real server on loopback:
-  /// `cancel()` returned in 130-175 ms with about a megabyte in flight, and the
-  /// bytes delivered after it returned were zero.
+  /// a cancel lands when control next reaches the `yield` below — in practice
+  /// after the reads already in flight (dartssh2 pipelines them) have been
+  /// answered. No new READ is issued after that. Measured against a real server
+  /// on loopback: `cancel()` returned in 130-175 ms with about a megabyte in
+  /// flight, and the bytes delivered after it returned were zero.
   /// 它不是瞬时的，而这个上界值得写明，因为调用方要等它：`async*` 生成器只在挂起点
-  /// 展开，因此取消会在控制流下一次到达 `yield*` 时生效——实际就是已经发出的读（
-  /// dartssh2 会流水线化它们）得到应答之后。此后不会再发出新的 READ。在回环地址上对
-  /// 真实服务器实测：约 1 MB 在途时 `cancel()` 在 130–175 ms 内返回，返回之后送达的
-  /// 字节数为 0。
+  /// 展开，因此取消会在控制流下一次到达下面的 `yield` 时生效——实际就是已经发出的读
+  /// （dartssh2 会流水线化它们）得到应答之后。此后不会再发出新的 READ。在回环地址上
+  /// 对真实服务器实测：约 1 MB 在途时 `cancel()` 在 130–175 ms 内返回，返回之后送达
+  /// 的字节数为 0。取消若落在「等待下一块」上，则最多等到 [stallTimeout]（见下）为止。
+  ///
+  /// The wait for the next chunk is bounded by [stallTimeout] too, and it fails as
+  /// [SftpFailure.read]. A read that has stopped being answered is the same shape
+  /// as a write that has stopped being acknowledged, and dropping it was wrong:
+  /// against a real server behind a link that stopped forwarding packets, this
+  /// stream delivered nothing, errored never and ended never, and a cancel issued
+  /// during that silence did not return either. The deadline is what lets a
+  /// caller's cancel finish — it ends the wait the cancel is blocked on, after
+  /// which the `finally` below runs.
+  /// 等待下一块同样以 [stallTimeout] 为上限，失败上报为 [SftpFailure.read]。读不到应答
+  /// 与写完得不到确认是同一形态，把它排除在外是错的：对一台位于「停止转发数据包的链路」
+  /// 之后的真实服务器，这条流什么都不送达、从不报错、也从不结束，而在这段沉默期间发出的
+  /// 取消同样不会返回。正是这个期限让调用方的取消得以完成——它结束了取消所阻塞的那个等待，
+  /// 随后下面的 `finally` 开始执行。
+  ///
+  /// Read through a [StreamIterator] rather than `yield* file.read(...)` for one
+  /// reason only: `yield*` hands the whole wait to the inner stream, and a wait
+  /// that never ends cannot be interrupted from here. The iterator turns "the
+  /// next chunk" into a future this method can race against a deadline, and costs
+  /// one future per chunk.
+  /// 这里用 [StreamIterator] 读取而不是 `yield* file.read(...)`，只有一个原因：
+  /// `yield*` 把整个等待交给了内层流，而一个永不结束的等待在这里无法被打断。迭代器把
+  /// 「下一块」变成一个本方法可以与期限赛跑的 future，代价是每块多一个 future。
   Stream<Uint8List> downloadStream(
     String path, {
     void Function(int bytesRead)? onProgress,
   }) async* {
     _ensureConnected();
     SftpFile? file;
+    StreamIterator<Uint8List>? reader;
+    final watch = TransferStallWatch(stallTimeout);
+    var stalled = false;
     try {
       file = await _sftp!.open(path, mode: SftpFileOpenMode.read);
-      yield* file.read(onProgress: onProgress);
-    } catch (e) {
-      throw SftpException(SftpFailure.read, e.toString());
-    } finally {
-      // Runs on normal completion, on error *and* on cancellation. Guarded
-      // because closing can throw once the transport is gone, and a throw here
-      // would replace the real failure (or, on cancellation, surface as an
-      // unhandled error on a stream nobody is listening to any more).
-      // 正常结束、出错**以及**被取消时都会执行。做了守护，因为传输层消失后关闭会抛
-      // 异常，而在这里抛出会顶掉真正的失败（被取消时则会在一个已无人监听的流上变成
-      // 未处理错误）。
-      try {
-        await file?.close();
-      } catch (_) {
-        // Handle already released / 句柄已释放。
+      reader = StreamIterator<Uint8List>(file.read(onProgress: onProgress));
+      while (true) {
+        final next = reader.moveNext();
+        if (!await watch.race(next)) {
+          stalled = true;
+          throw SftpException(SftpFailure.read, _stallDetail());
+        }
+        // Already complete, so awaiting it again costs nothing.
+        // 已经完成，再等一次不花代价。
+        if (!await next) break;
+        yield reader.current;
       }
+    } catch (e) {
+      throw e is SftpException ? e : SftpException(SftpFailure.read, e.toString());
+    } finally {
+      watch.stop();
+      // Runs on normal completion, on error *and* on cancellation. Each step is
+      // guarded separately and bounded: closing can throw once the transport is
+      // gone, and a throw here would replace the real failure (or, on
+      // cancellation, surface as an unhandled error on a stream nobody is
+      // listening to any more) — while an *unbounded* wait for a CLOSE that will
+      // never be acknowledged is what would keep that failure from ever reaching
+      // its caller at all. Cancelling the reader is what `yield*` used to do
+      // implicitly, when cancelling the generator cancelled the inner
+      // subscription; with an explicit iterator it is this method's job.
+      // 正常结束、出错**以及**被取消时都会执行。每一步单独收尾且有上界：传输层消失后
+      // 关闭会抛异常，而在这里抛出会顶掉真正的失败（被取消时则会在一个已无人监听的流上
+      // 变成未处理错误）——而对一个永远不会被确认的 CLOSE 做**无上界**的等待，则会让
+      // 那个失败根本到达不了它的调用方。取消读取方是 `yield*` 曾经隐式完成的事——生成器
+      // 被取消时它会取消内层订阅——换成显式迭代器后，它成了这里的职责。
+      await finishTeardown(reader?.cancel(), stalled: stalled);
+      await finishTeardown(file?.close(), stalled: stalled);
     }
   }
 
@@ -383,12 +449,12 @@ class SftpService {
   /// the stream it is given, so an error would be reported as an unhandled async
   /// error *and* leave its `done` pending forever — a hung upload that blocks its
   /// whole host queue. The queue therefore never errors the stream it hands over;
-  /// it closes it and reports the cause separately. See [_guardedSource] for the
-  /// backstop when a caller does not.
+  /// it closes it and reports the cause separately. See [guardedUploadSource] for
+  /// the backstop when a caller does not.
   /// [data] 不得发出错误。dartssh2 的写入器没有为它收到的流安装错误处理，因此错误会
   /// 变成未处理的异步错误，**并且**让它的 `done` 永远悬着——一次挂死的上传会阻塞整条
   /// 该主机的队列。因此队列交给它的流从不报错，而是关闭它并另行报告原因。调用方若不
-  /// 遵守，由 [_guardedSource] 兜底。
+  /// 遵守，由 [guardedUploadSource] 兜底。
   ///
   /// Cancellation is the caller's to arrange, and the shape is deliberate: the
   /// caller owns the stream it passes in, so closing that stream is what stops
@@ -397,6 +463,42 @@ class SftpService {
   /// 取消由调用方安排，其形式是刻意的：调用方拥有自己传入的流，因此关闭该流就是停止
   /// 传输的手段。关闭它会结束 dartssh2 的 `done`，从而执行下面的句柄关闭——本方法
   /// 不存在第二条留下半开句柄的退出路径。
+  ///
+  /// A write the *server* rejects is the case all of that misses, and it is the
+  /// worse one: dartssh2's `done` then never completes **no matter what the caller
+  /// does**, because the rejected chunk is thrown away inside a listener nobody
+  /// awaits, so closing the source — the whole of this app's cancel path — only
+  /// ends the stream without ever satisfying the check that completes the write.
+  /// Measured against a real server, uploading to `/dev/full` (every write
+  /// answered `SSH_FX_FAILURE`): this future was still pending three seconds after
+  /// the source had been closed, with eight unhandled `SftpStatusError`s, one per
+  /// chunk. So the wait is bounded by [stallTimeout], and what it measures is not
+  /// total time but the *absence of progress*: `onProgress` fires once per
+  /// acknowledged chunk and every one of those pushes the deadline back, so a
+  /// large upload over a slow link is untouched by it. Silence is reported as
+  /// [SftpFailure.write], which the queue turns into a failed task — the one
+  /// recoverable outcome; before this the row stayed *running* with a frozen bar,
+  /// Cancel did nothing, and every later transfer for that host sat *queued* until
+  /// the app was killed.
+  /// 服务器**拒绝**写入，是上面这一切都没有覆盖的情形，也是更糟的一种：此时 dartssh2
+  /// 的 `done` **无论调用方做什么**都不会完成，因为被拒绝的那一块是在一个无人等待的
+  /// 监听器里被丢掉的，所以关闭数据源（本应用取消路径的全部内容）只是结束了流，而那个
+  /// 用于完成写入的判断始终得不到满足。对真实服务器实测：上传到 `/dev/full`（每次写入
+  /// 都以 `SSH_FX_FAILURE` 作答）时，数据源关闭三秒后这个 future 仍然悬着，并出现八个
+  /// 未处理的 `SftpStatusError`（每块一个）。因此这里等待的上限是 [stallTimeout]，而它
+  /// 度量的不是总时长，是**没有进度**：每确认一块 `onProgress` 触发一次，每一次都把期限
+  /// 往后推，因此慢链路上的大文件上传不受影响。沉默会上报为 [SftpFailure.write]，队列
+  /// 据此把任务标记为失败——唯一可恢复的结局；在此之前该行停在**运行中**、进度条冻结，
+  /// 取消毫无作用，而该主机之后每一次传输都停在**排队中**直到应用被杀掉。
+  ///
+  /// What dartssh2 throws on the rejected chunk cannot be caught from here — the
+  /// future it lives on is dartssh2's — but it can be stopped from being
+  /// *unhandled*, and that is what [startGuardedSftpWrite] does; its recorded
+  /// error is also where the diagnosis below comes from, so what the user reads is
+  /// the server's own complaint.
+  /// dartssh2 在被拒绝的那一块上抛出的东西在这里捕获不到——它所在的 future 属于
+  /// dartssh2——但可以不让它处于**未处理**状态，这正是 [startGuardedSftpWrite] 所做的；
+  /// 下面上报的诊断也来自它记录的错误，因此用户读到的是服务器自己的抱怨。
   Future<void> uploadStream(
     String path,
     Stream<Uint8List> data, {
@@ -405,38 +507,50 @@ class SftpService {
     _ensureConnected();
     SftpFile? file;
     Object? sourceError;
+    var stalled = false;
     try {
-      file = await _sftp!.open(
+      final handle = file = await _sftp!.open(
         path,
         mode:
             SftpFileOpenMode.write |
             SftpFileOpenMode.create |
             SftpFileOpenMode.truncate,
       );
-      // `done` completes when the last chunk has been acknowledged, so awaiting
-      // it — rather than returning as soon as the last local byte was handed
-      // over — is what makes "the upload finished" true when this returns.
-      // `done` 在最后一块被确认时才完成，因此等待它（而不是在交出最后一个本地字节时
-      // 就返回）正是「上传已完成」在本方法返回时为真的原因。
-      await file
-          .write(
-            _guardedSource(data, (e) => sourceError = e),
-            onProgress: onProgress,
-          )
-          .done;
+      final watch = TransferStallWatch(stallTimeout);
+      final write = startGuardedSftpWrite(
+        handle,
+        guardedUploadSource(data, (e) => sourceError = e),
+        onProgress: (bytes) {
+          watch.progress();
+          onProgress?.call(bytes);
+        },
+      );
+      try {
+        // `done` completes when the last chunk has been acknowledged, so awaiting
+        // it — rather than returning as soon as the last local byte was handed
+        // over — is what makes "the upload finished" true when this returns.
+        // `done` 在最后一块被确认时才完成，因此等待它（而不是在交出最后一个本地字节时
+        // 就返回）正是「上传已完成」在本方法返回时为真的原因。
+        if (!await watch.race(write.writer.done)) {
+          // Silence: stop feeding the writer before reporting, so the source the
+          // caller handed over is released rather than left paused forever.
+          // 沉默：上报之前先停止供数，好让调用方交过来的数据源被释放，而不是永远停着。
+          stalled = true;
+          write.abort();
+          throw SftpException(SftpFailure.write, _stallDetail(write.rejected));
+        }
+      } finally {
+        watch.stop();
+      }
     } catch (e) {
-      throw SftpException(SftpFailure.write, e.toString());
+      throw e is SftpException ? e : SftpException(SftpFailure.write, e.toString());
     } finally {
       // Guarded for the same reason as in [downloadStream]: a throw from the
       // close must not replace the failure that caused it, and must never leave
       // the handle open.
       // 守护理由同 [downloadStream]：关闭抛出的异常不得顶掉引发它的失败，也绝不能把
       // 句柄留在打开状态。
-      try {
-        await file?.close();
-      } catch (_) {
-        // Handle already released / 句柄已释放。
-      }
+      await finishTeardown(file?.close(), stalled: stalled);
     }
     if (sourceError != null) {
       throw SftpException(SftpFailure.write, sourceError.toString());
@@ -508,31 +622,22 @@ class SftpService {
     }
   }
 
-  /// [source] with any error reported to [onError] and then turned into an
-  /// ordinary end of stream.
-  /// 把 [source] 的错误报告给 [onError] 后，转成一次普通的流结束。
+  /// The technical detail to report for a transfer that stopped moving bytes.
+  /// 为一次停止移动字节的传输上报的技术细节。
   ///
-  /// An `async*` body wrapping `await for` is the only shape that both keeps
-  /// backpressure (a paused consumer pauses [source], which is what a plain
-  /// `handleError` would give up) and guarantees the output stream *ends* rather
-  /// than erroring — and ending is the point: see [uploadStream] for why an
-  /// error on this stream hangs the writer instead of failing it.
-  /// 用 `async*` 包住 `await for` 是唯一同时满足两件事的写法：既保住背压（消费者暂停
-  /// 会暂停 [source]，而朴素地用 `handleError` 会丢掉这一点），又保证输出流*结束*而
-  /// 不是报错——而「结束」正是关键：[uploadStream] 的注释解释了为什么这条流上的错误
-  /// 会让写入器挂死而不是失败。
-  Stream<Uint8List> _guardedSource(
-    Stream<Uint8List> source,
-    void Function(Object error) onError,
-  ) async* {
-    try {
-      await for (final chunk in source) {
-        yield chunk;
-      }
-    } catch (e) {
-      onError(e);
-    }
-  }
+  /// [cause] — what dartssh2's own listener reported, when anything did — wins,
+  /// because it is the server's own complaint and the convention here is that
+  /// [SftpException.detail] is the underlying error's rendering and never a
+  /// sentence this app wrote. The fallback is the only thing left to say when
+  /// there is no such error, which is the case for a connection that has gone
+  /// away entirely: a number, not a translation.
+  /// 有内容时以 [cause]——dartssh2 自己的监听器所报告的东西——为准，因为那是服务器自己
+  /// 的抱怨，而这里的约定是：[SftpException.detail] 是底层错误自身的呈现，绝不是本应用
+  /// 写下的句子。完全没有这种错误时（例如连接整个消失）才使用兜底值：它是一个数字，
+  /// 不是一句译文。
+  String _stallDetail([Object? cause]) => cause != null
+      ? cause.toString()
+      : 'no progress for ${stallTimeout.inMilliseconds}ms';
 
   /// Whether the connect attempt identified by [epoch] was invalidated by a
   /// [disconnect] that landed while it was suspended on an `await`.
@@ -663,102 +768,4 @@ class SftpService {
     }
     return SftpFailure.connect;
   }
-}
-
-/// What went wrong in an [SftpService] operation.
-/// [SftpService] 的某次操作出了什么问题。
-///
-/// A machine-readable code, not a sentence. The words a user reads come from the
-/// i18n table, via `pages/sftp/sftp_error_text.dart`; this service used to write
-/// those words itself, in Chinese, on every failed operation — which is why an
-/// English user got a Chinese diagnosis for a failed listing, read or delete.
-/// 机器可读的编码，而非句子。用户读到的文字来自 i18n 表，经由
-/// `pages/sftp/sftp_error_text.dart`；本服务此前自己书写这些文字，且写的是中文，
-/// 因此英文用户在列举、读取或删除失败时得到的都是中文诊断。
-enum SftpFailure {
-  /// No live SFTP session to run the operation on.
-  /// 没有可执行操作的 SFTP 会话。
-  notConnected,
-
-  /// The connection attempt timed out.
-  /// 连接尝试超时。
-  connTimeout,
-
-  /// Authentication was rejected.
-  /// 认证被拒绝。
-  authFailed,
-
-  /// The server refused the connection.
-  /// 服务器拒绝连接。
-  connRefused,
-
-  /// The host address could not be resolved.
-  /// 主机地址无法解析。
-  hostUnreachable,
-
-  /// The connection failed for a reason none of the above covers.
-  /// 连接失败，原因不属于以上任何一类。
-  connect,
-
-  /// Listing a directory failed.
-  /// 列举目录失败。
-  list,
-
-  /// Reading a file failed.
-  /// 读取文件失败。
-  read,
-
-  /// Writing a file failed.
-  /// 写入文件失败。
-  write,
-
-  /// Deleting an entry failed.
-  /// 删除条目失败。
-  delete,
-
-  /// Renaming an entry failed.
-  /// 重命名条目失败。
-  rename,
-
-  /// Creating a directory failed.
-  /// 创建目录失败。
-  mkdir,
-}
-
-/// Exception thrown by [SftpService] operations.
-/// [SftpService] 操作抛出的异常。
-///
-/// Carries a code and the raw detail instead of a message: prose belongs to the
-/// i18n table, and a service that composes it can only compose it in one
-/// language. Pair it with `sftpErrorText` to get something a user can read.
-/// 携带编码与原始细节，而不是消息：文案属于 i18n 表，而自行组装文案的服务只能组装
-/// 出一种语言。需要给用户读的文字时，请配合 `sftpErrorText` 使用。
-class SftpException implements Exception {
-  /// What went wrong.
-  /// 出了什么问题。
-  final SftpFailure kind;
-
-  /// The underlying error's own rendering — a socket error, a protocol status —
-  /// never a sentence this app wrote. Null when there is nothing to add, as with
-  /// [SftpFailure.notConnected].
-  /// 底层错误自身的呈现——套接字错误、协议状态——绝不是本应用写下的句子。
-  /// 无可补充时为 null，例如 [SftpFailure.notConnected]。
-  final String? detail;
-
-  const SftpException(this.kind, [this.detail]);
-
-  /// Technical rendering of the failure: printable, never displayable.
-  /// 失败的技术呈现：可以打印，不能直接展示。
-  ///
-  /// Kept so callers that read `.message` still compile and still have something
-  /// to print. It is deliberately not translated — anything a user reads must go
-  /// through `sftpErrorText`, which is what actually respects the language
-  /// setting.
-  /// 保留它，是为了让读取 `.message` 的调用方仍能编译、仍能拿到可打印的内容。它有
-  /// 意不做翻译——任何给用户读的文字都必须经由 `sftpErrorText`，那才是真正遵循语言
-  /// 设置的路径。
-  String get message => detail ?? kind.name;
-
-  @override
-  String toString() => detail == null ? kind.name : '${kind.name}: $detail';
 }
