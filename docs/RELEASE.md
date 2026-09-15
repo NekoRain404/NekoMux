@@ -56,13 +56,24 @@ Preferred Flutter command:
 /home/nekorain/Projects/flutter/bin/flutter build apk --release --split-per-abi
 ```
 
-If Gradle reads a stale proxy from `~/.gradle/gradle.properties`, use direct
-Gradle build with explicit proxy override:
+If Gradle fails with `Gradle threw an error while downloading artifacts from
+the network`, do not assume the proxy in `~/.gradle/gradle.properties` is good
+— check that something is actually listening on its port, and test whether the
+direct route works:
+
+```bash
+(ss -ltn || netstat -ltn) | grep -E '7890|7897'
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://dl.google.com/dl/android/maven2/com/android/tools/build/apksigner/maven-metadata.xml
+```
+
+If that returns `200`, bypass the proxy for one build without touching the
+machine-wide config:
 
 ```bash
 android/gradlew -p android --no-daemon \
-  -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 \
-  -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890 \
+  -Dhttp.nonProxyHosts='*' -Dhttps.nonProxyHosts='*' \
+  -Dhttp.proxyHost= -Dhttp.proxyPort= -Dhttps.proxyHost= -Dhttps.proxyPort= \
   app:assembleRelease \
   -Ptarget-platform=android-arm,android-arm64,android-x64 \
   -Psplit-per-abi=true \
@@ -70,6 +81,17 @@ android/gradlew -p android --no-daemon \
   -Ptree-shake-icons=true \
   -Ptrack-widget-creation=false
 ```
+
+If it does not, point `-Dhttps.proxyHost` / `-Dhttps.proxyPort` at the port the
+proxy is really on and keep the rest of the command as-is.
+
+Two traps: `GRADLE_OPTS` does **not** override the proxy (`systemProp.*` in
+`gradle.properties` takes precedence), so the override has to be a command-line
+`-D`; and `-Ptarget-platform` takes one value per ABI.
+
+Always confirm the result with `apksigner verify --print-certs` against the
+**installed** app before sideloading over it — a mismatched signing key forces
+an uninstall, which wipes the user's hosts and credentials.
 
 ## Copy Release Outputs
 
