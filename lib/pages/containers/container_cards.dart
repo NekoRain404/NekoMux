@@ -162,7 +162,7 @@ class ContainerCard extends StatelessWidget {
                     style: TextStyle(
                       color: cs.secondary.withValues(alpha: 0.8),
                       fontSize: 11,
-                      fontFamily: 'monospace',
+                      fontFamily: AppFonts.mono,
                     ),
                   ),
                 ),

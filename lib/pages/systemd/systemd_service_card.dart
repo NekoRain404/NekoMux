@@ -7,6 +7,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_fonts.dart';
+
 import '../../widgets/app_ui.dart';
 import 'systemd_visuals.dart';
 
@@ -47,7 +49,7 @@ class SystemdServiceCard extends StatelessWidget {
                     color: cs.onSurface,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    fontFamily: 'monospace',
+                    fontFamily: AppFonts.mono,
                   ),
                 ),
                 if ((svc['description'] as String).isNotEmpty) ...[

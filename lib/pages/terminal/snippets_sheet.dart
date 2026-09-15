@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../core/theme/app_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/i18n/strings.dart';
 import '../../models/snippet.dart';
@@ -159,7 +161,7 @@ class SnippetsSheet extends ConsumerWidget {
                                         alpha: 0.6,
                                       ),
                                       fontSize: 11,
-                                      fontFamily: 'monospace',
+                                      fontFamily: AppFonts.mono,
                                     ),
                                   ),
                                 ],

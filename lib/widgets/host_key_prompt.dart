@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/theme/app_fonts.dart';
+
 import '../core/i18n/strings.dart';
 import '../services/known_hosts_store.dart';
 
@@ -96,7 +98,7 @@ Future<bool> showHostKeyPrompt(
               style: TextStyle(
                 color: isChanged ? cs.error : cs.primary,
                 fontSize: 12,
-                fontFamily: 'monospace',
+                fontFamily: AppFonts.mono,
               ),
             ),
           ),

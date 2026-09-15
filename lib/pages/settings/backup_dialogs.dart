@@ -11,6 +11,8 @@
 // 因此「询问」与「写入」这一对备份中至关重要的区别在调用处一目了然。
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_fonts.dart';
+
 import '../../core/i18n/strings.dart';
 
 /// Asks what an outgoing backup may carry, before any of it is built.
@@ -175,7 +177,7 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
         style: TextStyle(
           color: cs.onSurface,
           fontSize: 12,
-          fontFamily: 'monospace',
+          fontFamily: AppFonts.mono,
         ),
         decoration: InputDecoration(
           hintText: t('paste_json_hint'),

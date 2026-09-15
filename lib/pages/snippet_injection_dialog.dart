@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_fonts.dart';
 import '../core/i18n/strings.dart';
 import '../widgets/app_ui.dart';
 
@@ -170,7 +172,7 @@ class _InjectionFormDialogState extends State<_InjectionFormDialog> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: cs.onSurface.withValues(alpha: 0.74),
-                    fontFamily: 'monospace',
+                    fontFamily: AppFonts.mono,
                     fontSize: 12,
                     height: 1.4,
                   ),

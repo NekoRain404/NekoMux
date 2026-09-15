@@ -48,13 +48,18 @@ class HostListView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final visible = [for (final s in sections) if (s.count > 0) s];
+    final visible = [
+      for (final s in sections)
+        if (s.count > 0) s,
+    ];
     final showGroupHeaders = shouldShowGroupHeaders(sections);
 
     if (visible.isEmpty) {
       return ListView(
         padding: const EdgeInsets.only(top: 12, bottom: 32),
-        children: [hasQuery ? _buildNoResults(cs) : _buildEmptyState(context, cs)],
+        children: [
+          hasQuery ? _buildNoResults(cs) : _buildEmptyState(context, cs),
+        ],
       );
     }
 

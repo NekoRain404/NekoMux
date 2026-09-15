@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_fonts.dart';
 import 'package:flutter/services.dart';
 import '../core/i18n/strings.dart';
 import '../widgets/app_ui.dart';
@@ -348,7 +350,7 @@ class _FilePreviewPageState extends State<FilePreviewPage> {
             _controller.text,
             style: TextStyle(
               color: cs.onSurface,
-              fontFamily: 'monospace',
+              fontFamily: AppFonts.mono,
               fontSize: 14,
               height: 1.6,
             ),
@@ -371,7 +373,7 @@ class _FilePreviewPageState extends State<FilePreviewPage> {
         textAlignVertical: TextAlignVertical.top,
         style: TextStyle(
           color: cs.onSurface,
-          fontFamily: 'monospace',
+          fontFamily: AppFonts.mono,
           fontSize: 14,
           height: 1.6,
         ),

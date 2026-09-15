@@ -93,8 +93,10 @@ bool hostMatchesQuery(Host host, String query) {
 
 /// The hosts of [hosts] that match [query], keeping their incoming order.
 /// [hosts] 中匹配 [query] 的主机，保持原有顺序。
-List<Host> filterHosts(List<Host> hosts, String query) =>
-    [for (final host in hosts) if (hostMatchesQuery(host, query)) host];
+List<Host> filterHosts(List<Host> hosts, String query) => [
+  for (final host in hosts)
+    if (hostMatchesQuery(host, query)) host,
+];
 
 /// One group's worth of hosts: a name, and the hosts carrying it.
 /// 一个分组的主机：一个分组名，以及带有该名的那些主机。

@@ -13,6 +13,7 @@ import '../widgets/app_ui.dart';
 import 'host_console_page.dart';
 import 'add_host_page.dart';
 import 'hosts/host_list_model.dart';
+import 'hosts/host_list_widgets.dart';
 import 'hosts/host_list_view.dart';
 import 'hosts/host_search_field.dart';
 
@@ -475,7 +476,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
               const SizedBox(height: 16),
               const Divider(height: 1),
-              _HostActionRow(
+              HostActionRow(
                 icon: Icons.open_in_new,
                 label: t('host_detail'),
                 color: cs.secondary,
@@ -484,7 +485,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   _navigateToConsole(context, host);
                 },
               ),
-              _HostActionRow(
+              HostActionRow(
                 icon: Icons.edit_outlined,
                 label: t('edit'),
                 color: cs.onSurface.withValues(alpha: 0.72),
@@ -498,7 +499,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   );
                 },
               ),
-              _HostActionRow(
+              HostActionRow(
                 icon: Icons.delete_outline,
                 label: t('delete'),
                 color: cs.error,
@@ -536,45 +537,3 @@ class _HomePageState extends ConsumerState<HomePage> {
     ).showSnackBar(SnackBar(content: Text(t('host_deleted'))));
   }
 }
-
-class _HostActionRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _HostActionRow({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 21),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: color, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// One-line explanation shown under the "unverified" section header, so the
-/// state reads as "we have not checked this host yet" rather than as a failure.
-/// 「待验证」分组标题下的一行说明，让该状态读起来是「我们还没核对过这台主机」
-/// 而不是一次故障。

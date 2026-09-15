@@ -405,7 +405,9 @@ class SftpService {
         yield reader.current;
       }
     } catch (e) {
-      throw e is SftpException ? e : SftpException(SftpFailure.read, e.toString());
+      throw e is SftpException
+          ? e
+          : SftpException(SftpFailure.read, e.toString());
     } finally {
       watch.stop();
       // Runs on normal completion, on error *and* on cancellation. Each step is
@@ -543,7 +545,9 @@ class SftpService {
         watch.stop();
       }
     } catch (e) {
-      throw e is SftpException ? e : SftpException(SftpFailure.write, e.toString());
+      throw e is SftpException
+          ? e
+          : SftpException(SftpFailure.write, e.toString());
     } finally {
       // Guarded for the same reason as in [downloadStream]: a throw from the
       // close must not replace the failure that caused it, and must never leave

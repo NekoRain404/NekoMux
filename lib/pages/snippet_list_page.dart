@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../core/i18n/strings.dart';
@@ -411,7 +413,7 @@ class _SnippetTile extends StatelessWidget {
                     style: TextStyle(
                       color: cs.onSurface.withValues(alpha: 0.6),
                       fontSize: 13,
-                      fontFamily: 'monospace',
+                      fontFamily: AppFonts.mono,
                     ),
                   ),
                 ],

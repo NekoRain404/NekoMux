@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/i18n/strings.dart';
@@ -449,7 +451,7 @@ class _KnownHostTile extends StatelessWidget {
             style: TextStyle(
               color: cs.primary,
               fontSize: 12,
-              fontFamily: 'monospace',
+              fontFamily: AppFonts.mono,
               height: 1.35,
             ),
           ),

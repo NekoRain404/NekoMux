@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neko_mux/core/i18n/strings.dart';
+import 'package:neko_mux/core/theme/app_fonts.dart';
 import 'package:neko_mux/pages/known_hosts_page.dart';
 import 'package:neko_mux/pages/settings_page.dart';
 import 'package:neko_mux/providers/providers.dart';
@@ -157,7 +158,10 @@ const String _fingerprint = 'SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcd';
 /// 点击 [host] 那一行的「删除记录」操作——即该行自己的按钮，因此有多行时测试删除的
 /// 正是它指定的那一条。
 Future<void> _tapForget(WidgetTester tester, {String host = _host}) async {
-  final row = find.ancestor(of: find.text(host), matching: find.byType(AppCard));
+  final row = find.ancestor(
+    of: find.text(host),
+    matching: find.byType(AppCard),
+  );
   await tester.tap(
     find.descendant(
       of: row,
@@ -203,11 +207,18 @@ void main() {
         reason: 'the stored UTC string is not what a user reads',
       );
       // The fingerprint is here to be compared against `ssh-keyscan` output,
-      // so it has to be copyable and monospaced.
+      // so it has to be copyable and monospaced — and in the app's own mono
+      // face, not the platform's, so a fingerprint lines up with every other
+      // monospaced surface rather than changing shape from device to device.
+      // Asserted against the constant, so it cannot drift from the face the app
+      // actually bundles.
+      // 指纹是拿来与 `ssh-keyscan` 输出比对的，因此必须可复制且等宽——而且是应用自带的
+      // 等宽字体，而非系统等宽，这样指纹与其它等宽界面保持一致，不会因设备不同而变样。
+      // 断言对着常量，因此不会与应用实际打包的字体脱节。
       final fingerprint = tester.widget<SelectableText>(
         find.byType(SelectableText),
       );
-      expect(fingerprint.style?.fontFamily, 'monospace');
+      expect(fingerprint.style?.fontFamily, AppFonts.mono);
 
       // The key type is shown when the row has one.
       expect(

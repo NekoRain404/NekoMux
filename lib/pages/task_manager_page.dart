@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/i18n/strings.dart';
 import '../models/host.dart';
@@ -322,7 +324,7 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
                   color: cs.onSurface,
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  fontFamily: 'monospace',
+                  fontFamily: AppFonts.mono,
                 ),
                 maxLines: 3,
               ),
@@ -643,7 +645,7 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
                   style: TextStyle(
                     color: cs.onSurface.withValues(alpha: 0.56),
                     fontSize: 10,
-                    fontFamily: 'monospace',
+                    fontFamily: AppFonts.mono,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -709,7 +711,7 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
             color: color,
             fontSize: 10,
             fontWeight: FontWeight.w600,
-            fontFamily: 'monospace',
+            fontFamily: AppFonts.mono,
           ),
         ),
         const SizedBox(height: 3),

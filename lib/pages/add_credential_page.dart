@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../core/haptics.dart';
@@ -394,7 +396,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                   controller: _secretController,
                   style: TextStyle(
                     color: cs.onSurface,
-                    fontFamily: 'monospace',
+                    fontFamily: AppFonts.mono,
                     fontSize: 13,
                   ),
                   maxLines: 10,
