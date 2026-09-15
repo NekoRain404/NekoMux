@@ -23,7 +23,8 @@ import 'ssh_provider.dart';
 /// `services/transfer_runner.dart` — import that file alongside this one.
 /// 它返回的端口是 `TransferSession`，位于 `services/transfer_runner.dart`——使用时
 /// 需要与本文件一起 import。
-typedef TransferSessionFactory = Future<TransferSession> Function(String hostId);
+typedef TransferSessionFactory =
+    Future<TransferSession> Function(String hostId);
 
 /// Asks the user to accept a host key the queue has never seen before.
 /// 就队列从未见过的主机密钥征求用户同意。
@@ -54,7 +55,8 @@ typedef TransferHostKeyPrompt =
 /// 到这里。因此常见情形——向文件管理器已经打开过的服务器传输——不受影响。确实拥有
 /// 界面的调用方可以通过覆盖本 provider 提供一个真正的询问，把拒绝升级为提问。
 final transferHostKeyPromptProvider = Provider<TransferHostKeyPrompt>(
-  (ref) => (String fingerprint, HostKeyVerdict verdict) async => false,
+  (ref) =>
+      (String fingerprint, HostKeyVerdict verdict) async => false,
 );
 
 /// Opens the session a queued transfer runs on.
@@ -64,7 +66,8 @@ final transferHostKeyPromptProvider = Provider<TransferHostKeyPrompt>(
 /// be tested without a server.
 /// 测试中以假实现覆盖，这正是队列的决策逻辑能脱离服务器被测试的原因。
 final transferSessionFactoryProvider = Provider<TransferSessionFactory>(
-  (ref) => (String hostId) => _openSftpSession(ref, hostId),
+  (ref) =>
+      (String hostId) => _openSftpSession(ref, hostId),
 );
 
 /// Minimum gap between two progress-only updates of the queue's state.
@@ -174,7 +177,10 @@ final transferQueueProvider =
 /// 发布一整份新列表，因此监听列表的 widget 也会因别的任务的进度而重建；`select` 把它
 /// 收窄到一个任务，而 `TransferTask` 没有覆写 `==`，比较因而是同一性比较——这恰好
 /// 正确，因为队列只会为真正变化了的任务铸造新实例。
-final transferTaskProvider = Provider.family<TransferTask?, String>((ref, taskId) {
+final transferTaskProvider = Provider.family<TransferTask?, String>((
+  ref,
+  taskId,
+) {
   return ref.watch(
     transferQueueProvider.select(
       (tasks) => tasks.where((t) => t.id == taskId).firstOrNull,
@@ -562,7 +568,8 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
 
     final now = DateTime.now();
     final last = _lastProgressPublish;
-    if (last != null && now.difference(last) < ref.read(transferProgressIntervalProvider)) {
+    if (last != null &&
+        now.difference(last) < ref.read(transferProgressIntervalProvider)) {
       return;
     }
     _lastProgressPublish = now;

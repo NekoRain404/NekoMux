@@ -287,10 +287,7 @@ class TransferRunner {
     };
 
     try {
-      final stream = session.download(
-        task.remotePath,
-        onProgress: onProgress,
-      );
+      final stream = session.download(task.remotePath, onProgress: onProgress);
       subscription = stream.listen(
         sink.add,
         onError: (Object e, StackTrace st) {

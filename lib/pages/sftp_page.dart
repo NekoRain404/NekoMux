@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -10,6 +11,7 @@ import '../models/file_item.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
 import '../providers/ssh_provider.dart';
+import '../providers/transfer_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/sftp_service.dart';
 import '../widgets/host_key_prompt.dart';
@@ -21,6 +23,10 @@ import 'sftp/sftp_dialogs.dart';
 import 'sftp/sftp_error_text.dart';
 import 'sftp/sftp_file_list.dart';
 import 'sftp/sftp_path.dart';
+import 'transfer/transfer_actions.dart';
+import 'transfer/transfer_format.dart';
+import 'transfer/transfer_indicator.dart';
+import 'transfer/transfer_sheet.dart';
 
 /// SFTP file manager with directory browsing and file operations.
 /// 具备目录浏览与文件操作能力的 SFTP 文件管理器。
@@ -390,6 +396,8 @@ class _SftpPageState extends ConsumerState<SftpPage> {
         } else {
           _showSnack(t('binary_file_hint'));
         }
+      case SftpFileAction.download:
+        _queueDownload(file);
       case SftpFileAction.rename:
         await _showRenameDialog(file);
       case SftpFileAction.select:
@@ -397,6 +405,62 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       case SftpFileAction.delete:
         await _confirmDeleteFile(file);
     }
+  }
+
+  /// Picks a local file and queues it into the directory on screen — the path
+  /// the bar names, which is what every other write on this page targets too.
+  /// 挑选一个本地文件并把它排入屏幕上显示的目录——路径栏所示、也是本页其它每一处写入
+  /// 所针对的那个路径。
+  void _queueUpload() => _reportTransfer(
+    queueUploadFromPicker(ref, hostId: widget.host.id, remoteDir: _currentDir),
+  );
+
+  /// Queues a download of [file] into this app's staging area; the destination
+  /// is chosen on the finished row (see [queueDownloadToStaging]).
+  /// 把 [file] 的下载排入本应用的暂存区；目的地在该任务完成后的行上选定
+  /// （见 [queueDownloadToStaging]）。
+  ///
+  /// Synchronous throughout, so there is no `await` between the tap and the task
+  /// appearing in the queue — and no `mounted` guard to forget either.
+  /// 全程同步，因此从点击到任务出现在队列之间没有任何 `await`——也就没有会被忘记的
+  /// `mounted` 守卫。
+  void _queueDownload(FileItem file) => _reportTransfer(
+    queueDownloadToStaging(ref, hostId: widget.host.id, file: file),
+  );
+
+  /// Reports the one outcome a transfer action cannot report by itself: a
+  /// device-side failure, which has no row to appear on because nothing was ever
+  /// queued. Everything else shows up in the transfer list on its own.
+  /// 报告传输操作自身无法报告的那一种结局：设备侧失败——因为什么都没入队，它没有行可以
+  /// 出现。其余一切都会自己出现在传输列表中。
+  ///
+  /// The outcome is awaited rather than the action, so a synchronously enqueued
+  /// download is in the queue before this returns.
+  /// 这里等待的是结局而不是动作，因此同步入队的下载在它返回之前就已在队列中。
+  Future<void> _reportTransfer(FutureOr<TransferQueueOutcome> outcome) async {
+    final result = await outcome;
+    if (!mounted || result != TransferQueueOutcome.localIo) return;
+    _showSnack(t('transfer_error_local_io'), isError: true);
+  }
+
+  /// Opens the transfer list over this page, then re-lists the directory it may
+  /// have changed.
+  /// 在本页之上打开传输列表，返回时重新列举它可能改变了内容的目录。
+  ///
+  /// The queue runs on a connection of its own, so an upload that finished while
+  /// the sheet was open would otherwise look like it never happened — precisely
+  /// the question the user opened the sheet to answer. One listing of the
+  /// directory already on screen, and none while something is still moving:
+  /// mid-transfer there is nothing new to see.
+  /// 队列使用自己的一条连接，因此在面板打开期间完成的上传否则会看起来从未发生过——
+  /// 而那正是用户打开面板要回答的问题。只列举一次屏幕上已有的那个目录，且在有传输仍在
+  /// 进行时完全不列举：传输途中没有新东西可看。
+  Future<void> _openTransfers() async {
+    await showTransferSheet(context);
+    if (!mounted || hasActiveTransfers(ref.read(transferQueueProvider))) {
+      return;
+    }
+    await _loadDirectory(_currentDir);
   }
 
   /// Renames [file] to the name the user types.
@@ -577,6 +641,12 @@ class _SftpPageState extends ConsumerState<SftpPage> {
               tooltip: t('new_file'),
               onPressed: _showNewEntryDialog,
             ),
+          // Hidden by the button itself while the queue is empty, and it watches
+          // only the task count — the page must not rebuild on every progress
+          // tick, and this is the one place that could make it.
+          // 队列为空时由按钮自己隐藏；它只监听任务数量——页面绝不能因每一次进度跳动而
+          // 重建，而这里是唯一可能让它那样的地方。
+          TransferQueueButton(onOpen: _openTransfers),
         ],
       ),
       body: _buildBody(),
@@ -645,6 +715,12 @@ class _SftpPageState extends ConsumerState<SftpPage> {
 
     return Column(
       children: [
+        // Above the path bar, because a transfer is not part of the listing: it
+        // belongs to the page, and it stays visible while the listing scrolls or
+        // is replaced by a spinner.
+        // 位于路径栏之上，因为传输不属于列表：它属于页面，因此在列表滚动或被转圈取代
+        // 时仍然可见。
+        TransferActivityBar(onOpen: _openTransfers),
         SftpBreadcrumbBar(
           labels: _crumbs.map((crumb) => crumb.label).toList(),
           isSelectionMode: _selection.isActive,
@@ -673,7 +749,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
             onCancel: _exitSelectionMode,
           )
         else
-          const SftpUploadBar(),
+          SftpUploadBar(onUpload: _queueUpload),
       ],
     );
   }

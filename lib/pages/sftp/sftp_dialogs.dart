@@ -233,6 +233,10 @@ enum SftpFileAction {
   /// 预览或编辑文件。
   open,
 
+  /// Copy it from the server to this device.
+  /// 把它从服务器复制到本机。
+  download,
+
   /// Rename or move it.
   /// 重命名或移动。
   rename,
@@ -254,6 +258,15 @@ enum SftpFileAction {
 /// leaving a dead tap behind.
 /// [canOpenFile] 只负责把二进制文件的预览项显示为灰色——选择仍会上报，让页面能
 /// 解释为什么没有打开，而不是留下一次毫无反应的点击。
+///
+/// A directory has no download entry at all, not a dimmed one: "download this
+/// directory" would have to mean a recursive copy, which the queue does not do —
+/// it moves one file at a time. A tap that must explain its own impossibility is
+/// worse than an entry that was never offered, and a directory is reached by
+/// opening it and downloading what is inside, one file at a time.
+/// 目录完全没有下载项，而不是灰显的下载项：「下载这个目录」只能意味着递归复制，而队列
+/// 不做这件事——它一次搬运一个文件。一次必须解释自己为何不可能的点击，比一个从未提供过
+/// 的入口更糟；要取目录里的东西，就进去逐个文件下载。
 Future<SftpFileAction?> showSftpFileActions(
   BuildContext context,
   FileItem file, {
@@ -264,11 +277,22 @@ Future<SftpFileAction?> showSftpFileActions(
     context: context,
     backgroundColor: cs.surface,
     showDragHandle: true,
+    // Without this the sheet is capped at 9/16 of the screen whatever its
+    // content needs. It fits today, but a sixth action — or the same five with
+    // longer labels in another language — would be clipped, and a clipped
+    // action is an action the user cannot reach. The scroll view below is the
+    // other half of that: together they mean the sheet is never taller than its
+    // content and its content is never taller than the screen.
+    // 没有这一项，无论内容需要多少，面板都被限制在屏幕的 9/16。今天塞得下，但再加一个
+    // 操作——或同样五个操作换成另一种语言里更长的标签——就会被裁掉，而被裁掉的操作就是
+    // 用户按不到的操作。下面的滚动视图是另一半：两者合起来意味着面板绝不会高于其内容，
+    // 其内容也绝不会高于屏幕。
+    isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
     ),
     builder: (ctx) => SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -323,6 +347,13 @@ Future<SftpFileAction?> showSftpFileActions(
                     ? cs.secondary
                     : cs.onSurface.withValues(alpha: 0.38),
                 onTap: () => Navigator.pop(ctx, SftpFileAction.open),
+              ),
+            if (!file.isDirectory)
+              _ActionTile(
+                icon: Icons.download_outlined,
+                label: t('download'),
+                color: cs.primary,
+                onTap: () => Navigator.pop(ctx, SftpFileAction.download),
               ),
             _ActionTile(
               icon: Icons.drive_file_rename_outline,

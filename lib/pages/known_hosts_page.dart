@@ -406,6 +406,7 @@ class _KnownHostTile extends StatelessWidget {
                   ),
                 ),
               ),
+
               /// The action keeps its word: a security decision the user has to
               /// reverse should read as what it does, not as an icon to decode.
               /// 这个操作保留文字：用户需要撤销的安全决定，应当写明它做什么，而不是
@@ -504,10 +505,7 @@ class _LoadFailure extends StatelessWidget {
             TextButton.icon(
               onPressed: onRetry,
               icon: Icon(Icons.refresh, color: cs.secondary, size: 18),
-              label: Text(
-                t('retry'),
-                style: TextStyle(color: cs.secondary),
-              ),
+              label: Text(t('retry'), style: TextStyle(color: cs.secondary)),
             ),
           ],
         ),

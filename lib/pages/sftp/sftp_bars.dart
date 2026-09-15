@@ -209,10 +209,22 @@ class SftpSelectionBar extends StatelessWidget {
   }
 }
 
-/// Bottom bar shown the rest of the time: the (not yet available) upload entry.
-/// 其余时间显示的底栏：尚未可用的上传入口。
+/// Bottom bar shown the rest of the time: the upload entry.
+/// 其余时间显示的底栏：上传入口。
+///
+/// It reports the tap and nothing else. Which directory the file belongs in is a
+/// decision about the *page's* state, and the page is the only thing that has
+/// it; a bar that guessed would be the second copy of a rule this codebase has
+/// already had to fix once.
+/// 它只上报点击，别的什么都不做。文件该放进哪个目录是关于**页面**状态的判断，而只有
+/// 页面拥有那份状态；一个自行猜测的底栏会成为这条规则的第二个副本，而本代码库已经为
+/// 此修复过一次。
 class SftpUploadBar extends StatelessWidget {
-  const SftpUploadBar({super.key});
+  /// Starts the upload flow: pick a file, then queue it.
+  /// 启动上传流程：挑选文件，然后入队。
+  final VoidCallback onUpload;
+
+  const SftpUploadBar({super.key, required this.onUpload});
 
   @override
   Widget build(BuildContext context) {
@@ -220,42 +232,46 @@ class SftpUploadBar extends StatelessWidget {
     final dividerColor = Theme.of(context).dividerColor;
     return Material(
       color: cs.surface,
-      child: Container(
-        width: double.infinity,
-        padding: EdgeInsets.fromLTRB(
-          16,
-          10,
-          16,
-          10 + MediaQuery.of(context).padding.bottom,
-        ),
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: dividerColor, width: 0.5)),
-        ),
-        child: Row(
-          children: [
-            AppIconBox(
-              icon: Icons.upload_file,
-              color: cs.onSurface.withValues(alpha: 0.38),
-              size: 36,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                t('upload'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.52),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+      child: InkWell(
+        onTap: onUpload,
+        child: Container(
+          width: double.infinity,
+          padding: EdgeInsets.fromLTRB(
+            16,
+            10,
+            16,
+            10 + MediaQuery.of(context).padding.bottom,
+          ),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: dividerColor, width: 0.5)),
+          ),
+          child: Row(
+            children: [
+              AppIconBox(
+                icon: Icons.upload_file,
+                color: cs.secondary,
+                size: 36,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  t('upload'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cs.onSurface.withValues(alpha: 0.78),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-            AppBadge(
-              label: t('upload_dev'),
-              color: cs.onSurface.withValues(alpha: 0.42),
-            ),
-          ],
+              Icon(
+                Icons.add,
+                size: 20,
+                color: cs.secondary.withValues(alpha: 0.8),
+              ),
+            ],
+          ),
         ),
       ),
     );
