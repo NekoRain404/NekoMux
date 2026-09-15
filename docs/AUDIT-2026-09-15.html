@@ -550,7 +550,7 @@
   <section class="panel">
     <h2>修复进度</h2>
     <p class="note">
-      本页记录的 54 条缺陷中，<b>52 条已修复并提交</b>，全部经 <code>flutter analyze</code>（无问题）与 <code>flutter test</code>（<b>300 条</b>，审计前为 0 条）验证。每条修复都带「先写失败测试、观察它确实失败、再修」的证据。
+      本页记录的 57 条缺陷中，<b>52 条已修复并提交</b>，全部经 <code>flutter analyze</code>（无问题）与 <code>flutter test</code>（<b>300 条</b>，审计前为 0 条）验证。每条修复都带「先写失败测试、观察它确实失败、再修」的证据。
     </p>
     <ul>
       <li><b>两条未修。</b> <code>eng-3</code>（<code>termux-app/</code> 那份 9.7MB、未被任何构建引用的克隆）删除与否需要产品决策，不是技术问题；<code>eng-5</code>（字体在运行时从 Google Fonts 拉取）需要把字体子集打进 assets，是一块独立工作而非缺陷修补。</li>
@@ -1110,7 +1110,7 @@
     <div class="tier-head">
       <h2>P2 · 健壮性与可用性</h2>
       <span class="note">静默失败、无上限的资源使用、以及会让用户误判状态的细节。</span>
-      <span class="tally" style="color:var(--p2);background:var(--p2-bg)">11 条</span>
+      <span class="tally" style="color:var(--p2);background:var(--p2-bg)">13 条</span>
     </div>
 
     <article class="f" data-sev="P2" data-id="rob-1">
@@ -1287,14 +1287,47 @@
         </dl>
       </div>
     </article>
+
+    <article class="f" data-sev="P2" data-id="ui-1">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="ui-1" aria-label="标记 ui-1 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">ui-1</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">抽屉分区标题被居中，与左对齐的条目不对齐</h3>
+        <div class="f-refs"><code>lib/widgets/app_drawer.dart:26</code><code>lib/widgets/app_drawer.dart:191</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>抽屉内容所在的 <code>Column</code> 没有设置 <code>crossAxisAlignment</code>，默认为 <code>center</code>。<code>_Section</code> 是一个 <code>Padding</code> 包着一段短文本，于是自身居中；而 <code>_Tile</code> 会撑满宽度、内容左对齐。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">真机上「工具」「系统」两个分区标题浮在抽屉正中，下方条目却左对齐——看起来像是布局坏了，而不是有意的分组。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd>让分区标题与条目内容共用同一条左边缘，而不是各自「左对齐」。<b>这条是真机截图发现的</b>，代码审读时没看出来。</dd></div>
+        </dl>
+      </div>
+    </article>
+
+    <article class="f" data-sev="P2" data-id="ui-2">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="ui-2" aria-label="标记 ui-2 已修复"><span></span></label>
+        <span class="sev sev-p2">P2</span><span class="f-id">ui-2</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">界面语言为英文时，设置行把同一句话显示两遍</h3>
+        <div class="f-refs"><code>lib/pages/settings/settings_tiles.dart</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>设置行的副标题文案是按「中文标题 + 英文副标题」写的——在中文界面下这是有意的双语样式。但切到英文后，标题与副标题都成了英文，于是每一行都读作 <span class="m">Terminal Font Size</span> 叠着 <span class="m">Terminal Font Size</span>；<code>Connection Timeout</code>、<code>Haptic Feedback</code> 同样。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">英文（及其它七种语言）界面下，设置页近半数的行看起来像是渲染重复了。修复要落在<b>组件</b>而不是翻译数据上：副标题与标题相同时不渲染副标题——一次修好所有语言，而且「重复标题的副标题不携带任何信息」本身就是正确规则。</dd></div>
+          <div class="f-row"><dt>修复</dt><dd>在设置行的各类瓷片里加该判断（去除首尾空白后比较）。<b>真机切到英文才发现</b>。</dd></div>
+        </dl>
+      </div>
+    </article>
   </section>
+
 
   <!-- ══════════════════ P3 ══════════════════ -->
   <section class="tier" data-tier="P3">
     <div class="tier-head">
       <h2>P3 · i18n 一致性与工程卫生</h2>
       <span class="note">不会立刻让功能失效，但会持续侵蚀可维护性与协作。</span>
-      <span class="tally" style="color:var(--p3);background:var(--p3-bg)">12 条</span>
+      <span class="tally" style="color:var(--p3);background:var(--p3-bg)">13 条</span>
     </div>
 
     <article class="f" data-sev="P3" data-id="i18n-1">
@@ -1489,7 +1522,23 @@
         </dl>
       </div>
     </article>
+
+    <article class="f" data-sev="P3" data-id="eng-9">
+      <div class="f-rail">
+        <label class="mark"><input type="checkbox" data-id="eng-9" aria-label="标记 eng-9 已修复"><span></span></label>
+        <span class="sev sev-p3">P3</span><span class="f-id">eng-9</span>
+      </div>
+      <div class="f-main">
+        <h3 class="f-title">版本号硬编码在三处，其中一处已经过时</h3>
+        <div class="f-refs"><code>lib/widgets/app_drawer.dart</code><code>lib/pages/settings_page.dart</code><code>pubspec.yaml</code></div>
+        <dl class="f-body">
+          <div class="f-row"><dt>问题</dt><dd>抽屉底部写 <span class="m">v1.0.0-beta</span>，设置页「关于」写 <span class="m">v1.0.0</span>，而 <code>pubspec.yaml</code> 是 <code>1.0.0+1</code>。三个字面量各自独立漂移，其中一个已经和另外两个不一致。</dd></div>
+          <div class="f-row"><dt>后果</dt><dd class="impact">用户报缺陷时会说「1.0.0-beta」——一个并不存在的版本号。修复的第一步是三处共用同一个常量；真正解决漂移需要运行时读取（<code>package_info_plus</code>），那是引入依赖的一步。</dd></div>
+        </dl>
+      </div>
+    </article>
   </section>
+
 
   <!-- ══════════════════ 已移除 ══════════════════ -->
   <section class="panel">
