@@ -76,6 +76,16 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// 取代它——那会连带丢掉用户仍然可以操作的目录。
   bool _hasListingOnScreen = false;
 
+  /// True when the transport died under this page rather than a single
+  /// operation failing.
+  ///
+  /// Separate from [_errorMessage] because the two states are shown in different
+  /// places: a failed listing is a snackbar over a listing that is still true,
+  /// while a session that is over needs the full-page reconnect view — every
+  /// later operation will fail the same way, and the listing on screen is now
+  /// a picture of how things were.
+  bool _sessionLost = false;
+
   @override
   void initState() {
     super.initState();
@@ -175,6 +185,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     setState(() {
       _isConnecting = true;
       _errorMessage = null;
+      _sessionLost = false;
     });
     try {
       await _sftpService!.connect();
@@ -190,6 +201,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
         await _sftpService?.disconnect();
         return;
       }
+      _watchSession();
       await _loadDirectory('/');
     } on SftpException catch (e) {
       if (!mounted) return;
@@ -206,6 +218,31 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       // 情况下抛异常。
       if (mounted) setState(() => _isConnecting = false);
     }
+  }
+
+  /// Reacts to the transport going away under a live page.
+  ///
+  /// Without this the page could only fail: a dead session makes every later
+  /// operation throw the same error, so browsing turned into a run of snackbars
+  /// with no reconnect and no explanation — while the terminal, which has had
+  /// this since it was written, put a single "disconnected" view with a retry in
+  /// front of the user. A deliberate [disconnect] resets the signal, so this
+  /// only fires for a session that ended on its own.
+  void _watchSession() {
+    final closed = _sftpService?.closed;
+    if (closed == null) return;
+    unawaited(
+      closed.then((_) {
+        if (!mounted || _isConnecting) return;
+        setState(() {
+          _sessionLost = true;
+          // Shown by the status view, which takes over the body: the listing is
+          // kept in [_files] so reconnecting brings it straight back, and
+          // [_errorMessage] carries the reason the user reads while it is down.
+          _errorMessage = t('disconnected');
+        });
+      }),
+    );
   }
 
   /// Retries from the error page: drop the old session, then connect again.
@@ -763,7 +800,9 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     // drawing needs either of them.
     // 页面处于三种状态中的哪一种由这里决定——列表与加载状态都在这里；而每种状态长什么样
     // 不由这里决定，因为绘制它们不需要这两样中的任何一样。
-    if (_isConnecting || (_errorMessage != null && _files.isEmpty)) {
+    if (_isConnecting ||
+        _sessionLost ||
+        (_errorMessage != null && _files.isEmpty)) {
       return SftpStatusView(
         isConnecting: _isConnecting,
         errorMessage: _errorMessage,

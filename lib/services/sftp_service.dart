@@ -7,6 +7,7 @@ import '../models/file_item.dart';
 import 'host_key_verifier.dart';
 import 'sftp_failure.dart';
 import 'sftp_format.dart';
+import 'sftp_liveness.dart';
 import 'sftp_tree.dart';
 import 'sftp_guards.dart';
 import 'ssh_service.dart';
@@ -113,6 +114,19 @@ class SftpService implements SftpTreeOps {
 
   /// Creates a new SFTP service for the given [host] and [credential].
   /// 使用给定的 [host] 和 [credential] 创建新的 SFTP 服务。
+  /// Whether the SSH transport under this session is still there, and the
+  /// signal a page waits on to tell one failed listing apart from a finished
+  /// session. See [SftpLiveness].
+  final SftpLiveness _liveness = SftpLiveness();
+
+  /// Completes when the transport goes away, or null before a connect.
+  ///
+  /// A page subscribes to this after connecting: a transport that dies under a
+  /// live page turns every later operation into the same failure, and without
+  /// this signal the only way to learn that the session is over is to keep
+  /// failing at it.
+  Future<void>? get closed => _liveness.closed;
+
   SftpService({
     required this.host,
     required this.credential,
@@ -191,6 +205,12 @@ class SftpService implements SftpTreeOps {
       // 在等待前先发布客户端，好让 [disconnect] 能拿到它并中止握手，
       // 而不是错过它、留下一个仍然存活且已完成认证的客户端。
       _client = client;
+
+      // Watched from the moment the transport exists, not from when the SFTP
+      // subsystem is up: a transport that dies during those two steps is just as
+      // dead, and a page waiting on the signal must not be told about a session
+      // that is already gone.
+      _liveness.track(client.done);
 
       await client.authenticated;
 
@@ -686,7 +706,11 @@ class SftpService implements SftpTreeOps {
   /// Throws if the SFTP session is not connected.
   /// 若 SFTP 会话未连接则抛出异常。
   void _ensureConnected() {
-    if (_sftp == null || _client == null) {
+    // The liveness check is what turns "the session ended" into one honest
+    // failure instead of a transport-level error per operation — the fields are
+    // still set when a socket dies underneath them, so they alone cannot tell
+    // the difference.
+    if (_sftp == null || _client == null || _liveness.isClosed) {
       throw const SftpException(SftpFailure.notConnected);
     }
   }
@@ -765,5 +789,10 @@ class SftpService implements SftpTreeOps {
     }
     _sftp = null;
     _client = null;
+    // Forgotten rather than marked closed: this teardown is the session ending
+    // on purpose, and a page that reconnects must not be told the *new* session
+    // is over because the old one was closed deliberately. The generation guard
+    // in [SftpLiveness.track] covers the late arrival; this covers the page.
+    _liveness.reset();
   }
 }
