@@ -1,0 +1,71 @@
+# On-device integration tests / 真机集成测试
+
+These tests run **on a real phone** against a **real SSH server**. They exist to
+answer the one question unit tests cannot: does a file survive the trip through
+the device's network stack, the real `dartssh2` client, and a real
+`sftp-server`, byte for byte?
+
+这些测试在**真机**上针对**真实 SSH 服务器**运行。它们回答单元测试无法回答的唯一问题：
+文件能否经过设备网络栈、真实的 `dartssh2` 客户端与真实的 `sftp-server`，一字节不差地
+走个来回。
+
+## Why not just `flutter test` / 为什么不放进 `flutter test`
+
+`flutter test` runs everything under `test/` with faked sessions — fast,
+deterministic, no network. That is the right default and it stays the default.
+These tests need a server, a device and a tunnel, so they live outside `test/`
+and only run when asked for explicitly.
+
+`flutter test` 会运行 `test/` 下所有测试，会话全部伪造——快速、确定、不依赖网络。
+这是正确的默认值，也将一直是默认值。这些测试需要服务器、设备与隧道，因此放在 `test/`
+之外，只在你明确要求时运行。
+
+## Running them / 运行方式
+
+1. Start the test server / 启动测试服务器:
+
+   ```bash
+   docker start nekomux-test-ssh      # publishes 127.0.0.1:2222
+   ```
+
+2. Tunnel it to the phone / 把隧道打到手机上:
+
+   ```bash
+   adb reverse tcp:2222 tcp:2222
+   ```
+
+3. Create the fixtures the download test reads (once) / 准备下载测试所需的夹具（一次）:
+
+   ```bash
+   sshpass -p nekotest ssh -p 2222 nekotest@127.0.0.1 \
+     'mkdir -p ~/fixtures && head -c 200000 /dev/urandom > ~/fixtures/rand200k.bin'
+   ```
+
+4. Run / 运行:
+
+   ```bash
+   flutter test integration_test/transfer_roundtrip_test.dart -d <device-id>
+   ```
+
+## What it checks / 检查内容
+
+| Test | What a failure means |
+| --- | --- |
+| reaches the test server | the tunnel or the server is down, not the app |
+| a file the app never wrote downloads intact | truncating or reordering reads |
+| upload then download is byte-identical | corruption in either direction |
+| an empty file survives both directions | a completion path that waits for "some bytes" |
+
+None of these need a screenshot: they assert on bytes, so they can be run and
+trusted on a headless machine.
+
+这些测试都不需要截图：它们直接对字节断言，因此在无人值守的机器上也能运行并采信。
+
+## Note / 注意
+
+The test build shares the app's `applicationId`, so running these **replaces the
+installed release build** on the device. Reinstall the release APK afterwards if
+you want the phone back on it.
+
+测试构建与应用共用 `applicationId`，因此运行它们会**替换设备上已安装的 release 版本**。
+若想让手机回到 release 版本，之后重新安装一次 APK 即可。
