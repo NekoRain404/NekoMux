@@ -7,6 +7,7 @@ import '../container_shell_page.dart';
 import '../sftp_page.dart';
 import '../ssh_terminal_page.dart';
 import '../systemd_page.dart';
+import '../tunnels_page.dart';
 import '../task_manager_page.dart';
 
 /// The feature launcher under the resource panel.
@@ -110,6 +111,19 @@ class ConsoleFunctionGrid extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) => ContainerShellPage(host: host),
                   ),
+                ),
+              ),
+              // Real, and verified end to end on a device: the tunnel carries
+              // bytes from a local socket through the SSH session to a port only
+              // the server can reach. It says how long it lasts on its own page.
+              FunctionGridTile(
+                icon: Icons.swap_horiz,
+                iconColor: mutedPurple,
+                title: t('port_forwarding'),
+                subtitle: t('new_tunnel'),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => TunnelsPage(host: host)),
                 ),
               ),
               FunctionGridTile(

@@ -1,9 +1,12 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:neko_mux/models/credential.dart';
 import 'package:neko_mux/models/host.dart';
+import 'package:neko_mux/services/port_forward_service.dart';
 import 'package:neko_mux/services/sftp_service.dart';
 import 'package:neko_mux/services/ssh_service.dart';
 
@@ -121,6 +124,64 @@ void main() {
       returned,
       equals(payload),
       reason: 'a byte-level difference means the transfer corrupted the file',
+    );
+  });
+
+  testWidgets('a local forward carries bytes to the server and back', (
+    tester,
+  ) async {
+    // A tunnel is only real if traffic goes through it, so this does not stop at
+    // "the socket bound": it asks the server for the one thing the server always
+    // answers with — its SSH banner — and reads it from a plain local socket on
+    // the phone. The bytes therefore went phone → app → SSH channel → sshd, and
+    // back.
+    final ssh = SshConnection(
+      host: host,
+      credential: credential,
+      onHostKeyVerify: acceptAnyKey,
+    );
+    addTearDown(ssh.dispose);
+    await ssh.connect();
+
+    final tunnels = PortForwardService(ssh);
+    addTearDown(tunnels.close);
+
+    // The server's own port, as the server sees it.
+    final forward = await tunnels.start(remoteHost: '127.0.0.1', remotePort: 2222);
+    expect(forward.localPort, greaterThan(0));
+
+    final socket = await Socket.connect(
+      InternetAddress.loopbackIPv4,
+      forward.localPort,
+    );
+    addTearDown(socket.destroy);
+
+    final banner = StringBuffer();
+    final done = Completer<void>();
+    final sub = socket.listen(
+      (chunk) {
+        banner.write(String.fromCharCodes(chunk));
+        if (banner.toString().contains('SSH-2.0') && !done.isCompleted) {
+          done.complete();
+        }
+      },
+      onError: (Object e) {
+        if (!done.isCompleted) done.completeError(e);
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete();
+      },
+    );
+    await done.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => fail('no banner came back through the tunnel'),
+    );
+    await sub.cancel();
+
+    expect(
+      banner.toString(),
+      contains('SSH-2.0'),
+      reason: 'the server answered through the forward',
     );
   });
 

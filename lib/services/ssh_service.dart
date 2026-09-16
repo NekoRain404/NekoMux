@@ -6,6 +6,7 @@ import '../models/host.dart';
 import '../models/credential.dart';
 import 'command_result.dart';
 import 'host_key_verifier.dart';
+import 'port_forward_service.dart';
 
 /// SSH connection lifecycle states.
 /// SSH 连接生命周期状态。
@@ -18,7 +19,7 @@ enum SshConnectionState { disconnected, connecting, connected, error }
 /// send input, resize the terminal, and report state / output via streams.
 /// 管理单个 SSH 会话：连接、认证、执行 shell、发送输入、调整终端大小，
 /// 并通过流上报状态和输出。
-class SshConnection {
+class SshConnection implements ForwardOpener {
   /// Target host configuration.
   /// 目标主机配置。
   final Host host;
@@ -325,6 +326,27 @@ class SshConnection {
   /// while suspended on an `await` (see [_isAbandoned]).
   /// 清理在 `await` 挂起期间被作废的连接尝试所创建的资源（见 [_isAbandoned]）。
   ///
+  /// Opens a channel to [remoteHost]:[remotePort] as the *server* sees it.
+  ///
+  /// Delegated rather than handed out: the client itself stays private, so a
+  /// caller cannot reach past this method to the transport that the connection's
+  /// own teardown is responsible for closing.
+  @override
+  Future<ForwardChannel> openForward({
+    required String remoteHost,
+    required int remotePort,
+  }) async {
+    final client = _client;
+    if (client == null || _state != SshConnectionState.connected) {
+      throw const PortForwardException(
+        PortForwardFailure.sessionClosed,
+        'not connected',
+      );
+    }
+    final channel = await client.forwardLocal(remoteHost, remotePort);
+    return _ChannelAdapter(channel);
+  }
+
   /// Only the references owned by that attempt are touched: `_client` and
   /// `_session` are deliberately left alone, because [disconnect] / [dispose]
   /// already cleared them and a newer attempt may own them by now.
@@ -747,4 +769,25 @@ class SshException implements Exception {
 
   @override
   String toString() => detail == null ? kind.name : '${kind.name}: $detail';
+}
+
+/// [ForwardChannel] over dartssh2's own forwarding channel.
+///
+/// An adapter rather than a use of the library type directly: `SSHForwardChannel`
+/// is a concrete class over an SSH channel, which a test cannot stand in for —
+/// and the tunnel's plumbing (sockets, pipes, teardown) is exactly what deserves
+/// testing.
+class _ChannelAdapter implements ForwardChannel {
+  _ChannelAdapter(this._channel);
+
+  final SSHForwardChannel _channel;
+
+  @override
+  Stream<Uint8List> get stream => _channel.stream;
+
+  @override
+  void write(List<int> data) => _channel.sink.add(data);
+
+  @override
+  Future<void> close() => _channel.close();
 }
