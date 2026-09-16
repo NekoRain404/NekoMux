@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -15,14 +14,15 @@ import '../providers/transfer_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/sftp_service.dart';
 import '../widgets/host_key_prompt.dart';
-import 'file_preview_page.dart';
 import 'sftp/directory_load_state.dart';
 import 'sftp/file_selection.dart';
 import 'sftp/sftp_bars.dart';
 import 'sftp/sftp_dialogs.dart';
 import 'sftp/sftp_error_text.dart';
 import 'sftp/sftp_file_list.dart';
+import 'sftp/sftp_file_open.dart';
 import 'sftp/sftp_path.dart';
+import 'sftp/sftp_path_entry.dart';
 import 'sftp/sftp_status_view.dart';
 import 'transfer/transfer_actions.dart';
 import 'transfer/transfer_format.dart';
@@ -329,6 +329,27 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     _loadDirectory(crumbs[index].path);
   }
 
+  /// Asks for a path and goes there.
+  ///
+  /// The breadcrumb bar can only go *up*: reaching `/var/log/nginx` from `/`
+  /// meant tapping through `var`, `log`, `nginx` — and a directory that is more
+  /// than one level deep in a list of hundreds is a hunt, not a navigation. A
+  /// server's paths are known to the person managing it, so the app asks rather
+  /// than making them scroll.
+  Future<void> _promptForPath() async {
+    final service = _sftpService;
+    if (service == null) return;
+
+    final resolved = await promptForRemotePath(
+      context,
+      service: service,
+      currentDir: _currentDir,
+      onError: (message) => _showSnack(message, isError: true),
+    );
+    if (resolved == null || !mounted) return;
+    await _loadDirectory(resolved);
+  }
+
   /// Handles a tap on a file row: preview for text, actions for anything else.
   /// 处理文件行的点击：文本文件预览，其余弹出操作面板。
   Future<void> _openEntry(FileItem file) async {
@@ -341,71 +362,20 @@ class _SftpPageState extends ConsumerState<SftpPage> {
 
   /// Opens a text file in the preview page.
   /// 用预览页面打开文本文件。
+  ///
+  /// The read guard, the decoding and the write-back live in
+  /// [openSftpTextFile]; what stays here is the choice between previewing and
+  /// showing the actions sheet, which is the page's own decision.
   Future<void> _openFile(FileItem file) async {
-    // Refuse before reading, not after. The preview page has its own size
-    // guard, but it only ever sees content that has already been pulled into
-    // memory: `readFile` buffers every chunk and the whole thing is decoded to
-    // a String first, so the out-of-memory happens before that guard can run.
-    // The directory listing already told us the size, so nothing needs to be
-    // fetched to make this decision.
-    // 在读之前就拒绝，而不是读完之后。预览页自己也有大小上限，但它看到的永远是
-    // 已经被读进内存的内容：`readFile` 会把每个分块都缓存下来，随后整份被解码成
-    // String，因此 OOM 发生在那个上限来得及生效之前。目录列表已经告诉我们大小，
-    // 做这个判断不需要拉取任何数据。
-    //
-    // Compared in bytes against a limit expressed in code units: for the ASCII
-    // logs and configs that matter, bytes >= code units, so this errs towards
-    // refusing a file that would in fact have fit — the safe direction.
-    // 用字节数与以「码元」表示的限额比较：对本场景真正要紧的 ASCII 日志与配置而言，
-    // 字节数 ≥ 码元数，所以这只会倾向于拒绝一个其实装得下的文件——是安全的方向。
-    if (file.size > FilePreviewPage.maxContentLength) {
-      _showSnack(t('file_too_large'), isError: true);
-      return;
-    }
-    try {
-      final bytes = await _sftpService!.readFile(file.path);
-      if (!mounted) return;
-      // Remote "text" files are routinely GBK or Latin-1 on a Chinese-locale
-      // server. Strict decoding threw FormatException, which nothing caught and
-      // nobody awaited: the tap simply did nothing. allowMalformed keeps those
-      // files readable, and the clauses below cover any other decode failure.
-      // 中文环境下服务器上的「文本」文件常为 GBK 或 Latin-1。严格解码会抛
-      // FormatException，而此前无人捕获、也无人等待该 Future：点击毫无反应。
-      // allowMalformed 让这些文件照常可读，下面的分支兜住其余解码失败。
-      final content = utf8.decode(bytes, allowMalformed: true);
-
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => FilePreviewPage(
-            filename: file.name,
-            content: content,
-            onSave: (newContent) async {
-              try {
-                await _sftpService!.writeFile(
-                  file.path,
-                  Uint8List.fromList(utf8.encode(newContent)),
-                );
-                if (mounted) _showSnack(t('file_saved'));
-              } on SftpException catch (e) {
-                if (mounted) _showSnack(sftpErrorText(e), isError: true);
-              }
-            },
-          ),
-        ),
-      );
-    } on SftpException catch (e) {
-      if (mounted) _showSnack(sftpErrorText(e), isError: true);
-    } on FormatException catch (_) {
-      if (mounted) _showSnack(_loadFailedMessage(file.name), isError: true);
-    } catch (e) {
-      if (mounted) _showSnack(_loadFailedMessage('$e'), isError: true);
-    }
+    final service = _sftpService;
+    if (service == null) return;
+    await openSftpTextFile(
+      context,
+      service: service,
+      file: file,
+      notify: _showSnack,
+    );
   }
-
-  /// "Load failed: …" for a file that could not be read or decoded.
-  /// 无法读取或解码文件时的「加载失败: …」提示。
-  String _loadFailedMessage(String detail) =>
-      t('load_failed_msg').replaceAll('{0}', detail);
 
   /// Per-file actions sheet, then whatever was chosen.
   /// 单文件操作面板，以及随后执行所选操作。
@@ -488,10 +458,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     // 数量，而对此的答复是两个数字，不是一条红色的横幅。
     if (plan.skipped > 0) {
       _showSnack(
-        batchDownloadReport(
-          queued: result.queued,
-          selected: _selection.count,
-        ),
+        batchDownloadReport(queued: result.queued, selected: _selection.count),
       );
     }
   }
@@ -748,20 +715,31 @@ class _SftpPageState extends ConsumerState<SftpPage> {
           isSelectionMode: _selection.isActive,
           onCancelSelection: _exitSelectionMode,
           onCrumbTap: _navigateToCrumb,
+          onEditPathTap: _sftpService == null ? null : _promptForPath,
         ),
         Divider(height: 1, color: Theme.of(context).dividerColor),
         Expanded(
-          child: SftpFileList(
-            files: _files,
-            isLoading: _directory.isLoading,
-            isSelectionMode: _selection.isActive,
-            selectedPaths: _selection.paths,
-            onOpenDirectory: _navigateToDirectory,
-            onTapFile: _openEntry,
-            onShowFileActions: _showFileActions,
-            onToggleSelection: _toggleSelection,
-            onEnterSelectionMode: _enterSelectionMode,
-            onCreateEntry: _showNewEntryDialog,
+          // Reloading a remote directory used to mean hitting the app bar's
+          // 22 px icon, which is disabled whenever a listing is already in
+          // flight — so the one gesture every other list in this app answers to
+          // (systemd, the task manager) did nothing here, on the screen most
+          // likely to be showing stale data: a directory changes when something
+          // else writes to it, which is exactly when the user pulls.
+          child: RefreshIndicator(
+            color: Theme.of(context).colorScheme.primary,
+            onRefresh: () => _loadDirectory(_currentDir),
+            child: SftpFileList(
+              files: _files,
+              isLoading: _directory.isLoading,
+              isSelectionMode: _selection.isActive,
+              selectedPaths: _selection.paths,
+              onOpenDirectory: _navigateToDirectory,
+              onTapFile: _openEntry,
+              onShowFileActions: _showFileActions,
+              onToggleSelection: _toggleSelection,
+              onEnterSelectionMode: _enterSelectionMode,
+              onCreateEntry: _showNewEntryDialog,
+            ),
           ),
         ),
         if (_selection.isActive)

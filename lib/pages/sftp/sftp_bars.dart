@@ -28,12 +28,16 @@ class SftpBreadcrumbBar extends StatelessWidget {
   /// 点击第 [index] 个片段；最后一个是当前目录。
   final ValueChanged<int> onCrumbTap;
 
+  /// Opens the "go to path" prompt. Null hides the button.
+  final VoidCallback? onEditPathTap;
+
   const SftpBreadcrumbBar({
     super.key,
     required this.labels,
     required this.isSelectionMode,
     required this.onCancelSelection,
     required this.onCrumbTap,
+    this.onEditPathTap,
   });
 
   @override
@@ -41,78 +45,98 @@ class SftpBreadcrumbBar extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Container(
       color: cs.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            if (isSelectionMode)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: onCancelSelection,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: cs.error.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      t('cancel'),
-                      style: TextStyle(
-                        color: cs.error,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+      padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
+      child: Row(
+        children: [
+          // The crumbs scroll; the path button does not. It is the way out of a
+          // deep hierarchy, so it must not be something the user has to scroll
+          // to the end of a long path to find.
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  if (isSelectionMode)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: GestureDetector(
+                        onTap: onCancelSelection,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: cs.error.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            t('cancel'),
+                            style: TextStyle(
+                              color: cs.error,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              ),
-            for (int i = 0; i < labels.length; i++) ...[
-              if (i > 0)
-                Icon(
-                  Icons.chevron_right,
-                  size: 16,
-                  color: cs.onSurface.withValues(alpha: 0.3),
-                ),
-              GestureDetector(
-                onTap: () => onCrumbTap(i),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: i == labels.length - 1
-                        ? cs.secondary.withValues(alpha: 0.1)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 180),
-                    child: Text(
-                      labels[i],
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: i == labels.length - 1
-                            ? cs.secondary
-                            : cs.onSurface.withValues(alpha: 0.6),
-                        fontSize: 13,
-                        fontWeight: i == labels.length - 1
-                            ? FontWeight.w600
-                            : FontWeight.normal,
+                  for (int i = 0; i < labels.length; i++) ...[
+                    if (i > 0)
+                      Icon(
+                        Icons.chevron_right,
+                        size: 16,
+                        color: cs.onSurface.withValues(alpha: 0.3),
+                      ),
+                    GestureDetector(
+                      onTap: () => onCrumbTap(i),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: i == labels.length - 1
+                              ? cs.secondary.withValues(alpha: 0.1)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 180),
+                          child: Text(
+                            labels[i],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: i == labels.length - 1
+                                  ? cs.secondary
+                                  : cs.onSurface.withValues(alpha: 0.6),
+                              fontSize: 13,
+                              fontWeight: i == labels.length - 1
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
+                  ],
+                ],
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+          if (onEditPathTap != null)
+            IconButton(
+              icon: Icon(
+                Icons.edit_location_alt_outlined,
+                size: 20,
+                color: cs.onSurface.withValues(alpha: 0.6),
+              ),
+              tooltip: t('go_to_path'),
+              onPressed: onEditPathTap,
+              visualDensity: VisualDensity.compact,
+            ),
+        ],
       ),
     );
   }

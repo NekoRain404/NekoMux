@@ -46,6 +46,9 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
   bool _isRefreshing = false;
   String? _error;
   List<DockerContainer> _containers = [];
+
+  /// Name of the container a `docker` command is currently running for, or null.
+  String? _pendingContainer;
   SshConnection? _ssh;
   Credential? _credential;
 
@@ -271,7 +274,13 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
       _showToast(t('ssh_not_connected'), isError: true);
       return;
     }
+    // One command per container at a time. The action sheet closes on tap, so
+    // re-opening it and tapping again used to issue a second `docker stop` /
+    // `docker rm -f` while the first was still running — against a card that
+    // had not changed yet, which is what invited the second tap.
+    if (_pendingContainer != null) return;
 
+    setState(() => _pendingContainer = container.name);
     try {
       final result = await ssh.runCommand(
         dockerActionCommand(action, container.name),
@@ -303,6 +312,15 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
     } catch (e) {
       if (mounted) {
         _showToast('${t('container_action_failed')}: $e', isError: true);
+      }
+    } finally {
+      // Cleared here rather than at the end of the success path: a failure that
+      // left the spinner running would make the container permanently
+      // un-actionable.
+      if (mounted) {
+        setState(() => _pendingContainer = null);
+      } else {
+        _pendingContainer = null;
       }
     }
   }
@@ -615,6 +633,7 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
           }
           final container = _containers[index];
           return ContainerCard(
+            busy: _pendingContainer == container.name,
             container: container,
             onTap: () => _showContainerActions(container),
           );

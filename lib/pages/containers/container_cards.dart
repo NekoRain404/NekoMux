@@ -21,14 +21,24 @@ class ContainerCard extends StatelessWidget {
   /// 要渲染的容器。
   final DockerContainer container;
 
-  /// Called when the card is tapped (opens the action sheet).
-  /// 卡片被点击时调用（打开操作面板）。
+  /// Called when the card is tapped (opens the action sheet). Ignored while
+  /// [busy], since the sheet's actions are the ones already running.
   final VoidCallback onTap;
+
+  /// True while a `docker` command for THIS container is in flight.
+  ///
+  /// The status dot keeps showing the daemon's last known answer, which for a
+  /// stop/restart is the state before the command — so without this the card
+  /// looks untouched for the seconds `docker stop` takes, and tapping again
+  /// issues a second one. The spinner says "in progress" without claiming a
+  /// state the daemon has not reported yet.
+  final bool busy;
 
   const ContainerCard({
     super.key,
     required this.container,
     required this.onTap,
+    this.busy = false,
   });
 
   @override
@@ -40,7 +50,7 @@ class ContainerCard extends StatelessWidget {
     return AppCard(
       margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
       padding: const EdgeInsets.all(14),
-      onTap: onTap,
+      onTap: busy ? null : onTap,
       borderColor: Theme.of(context).dividerColor.withValues(alpha: 0.5),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -60,20 +70,30 @@ class ContainerCard extends StatelessWidget {
                   ),
                 ),
               ),
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: statusColor,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: statusColor.withValues(alpha: 0.5),
-                      blurRadius: 4,
-                    ),
-                  ],
+              if (busy)
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.6,
+                    color: cs.secondary,
+                  ),
+                )
+              else
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: statusColor.withValues(alpha: 0.5),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
               const SizedBox(width: 6),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 120),

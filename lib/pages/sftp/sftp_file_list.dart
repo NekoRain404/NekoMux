@@ -79,17 +79,32 @@ class SftpFileList extends StatelessWidget {
     }
 
     if (files.isEmpty) {
-      return AppEmptyState(
-        icon: Icons.folder_open_outlined,
-        title: t('empty_dir'),
-        message: t('empty_dir_hint'),
-        actionLabel: t('new_file'),
-        onAction: onCreateEntry,
-        color: cs.primary,
+      // Scrollable so the enclosing pull-to-refresh still answers here. An
+      // empty directory is one of the two cases where a pull is most likely —
+      // the other is a full one — because "empty" is exactly the state a stale
+      // listing produces when the user just created something elsewhere.
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.5,
+            child: AppEmptyState(
+              icon: Icons.folder_open_outlined,
+              title: t('empty_dir'),
+              message: t('empty_dir_hint'),
+              actionLabel: t('new_file'),
+              onAction: onCreateEntry,
+              color: cs.primary,
+            ),
+          ),
+        ],
       );
     }
 
     return ListView.builder(
+      // Always scrollable, so a short directory can still be pulled: the default
+      // physics only allow a drag when the content overflows the viewport.
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: files.length,
       itemBuilder: (context, index) {
@@ -206,15 +221,19 @@ class SftpFileList extends StatelessWidget {
                 const SizedBox(width: 18)
               else
                 IconButton(
+                  // One control for both kinds of entry. The chevron a directory
+                  // used to show duplicated the row's own tap — opening it is
+                  // what a tap already does — while the actions the other rows
+                  // get (rename, in particular) were unreachable for a
+                  // directory, so a folder could be opened and batch-deleted but
+                  // never renamed or moved.
                   icon: Icon(
-                    file.isDirectory ? Icons.chevron_right : Icons.more_vert,
+                    Icons.more_vert,
                     size: 18,
                     color: cs.onSurface.withValues(alpha: 0.34),
                   ),
-                  tooltip: file.isDirectory ? t('open_file') : t('tools'),
-                  onPressed: file.isDirectory
-                      ? () => onOpenDirectory(file)
-                      : () => onShowFileActions(file),
+                  tooltip: t('tools'),
+                  onPressed: () => onShowFileActions(file),
                   visualDensity: VisualDensity.compact,
                   constraints: const BoxConstraints(
                     minWidth: 32,

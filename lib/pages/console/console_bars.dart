@@ -24,9 +24,9 @@ class HostConsoleAppBar extends StatelessWidget {
   /// 离开本页。
   final VoidCallback onBack;
 
-  /// Re-polls, or retries the connection when there is none.
-  /// 重新轮询；没有连接时改为重试连接。
-  final VoidCallback onRefresh;
+  /// Re-polls, or retries the connection when there is none. Null while a poll
+  /// is already running, which also disables the button.
+  final VoidCallback? onRefresh;
 
   const HostConsoleAppBar({
     super.key,
@@ -104,14 +104,31 @@ class HostConsoleAppBar extends StatelessWidget {
         ],
       ),
       actions: [
-        IconButton(
-          tooltip: t('refresh'),
-          icon: Icon(
-            Icons.refresh,
-            color: cs.onSurface.withValues(alpha: 0.62),
+        // The button becomes the progress it starts. It used to stay a refresh
+        // icon with no disabled state, so during the two sequential commands a
+        // refresh runs — up to ten seconds each — a second tap queued another
+        // pair against the same connection, and nothing on screen said the
+        // first pair was still going.
+        if (onRefresh == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14),
+            child: Center(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          )
+        else
+          IconButton(
+            tooltip: t('refresh'),
+            icon: Icon(
+              Icons.refresh,
+              color: cs.onSurface.withValues(alpha: 0.62),
+            ),
+            onPressed: onRefresh,
           ),
-          onPressed: onRefresh,
-        ),
       ],
     );
   }

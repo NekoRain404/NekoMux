@@ -12,6 +12,7 @@ import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
 import 'host_console_page.dart';
 import 'add_host_page.dart';
+import 'ssh_terminal_page.dart';
 import 'hosts/host_list_model.dart';
 import 'hosts/host_list_widgets.dart';
 import 'hosts/host_list_view.dart';
@@ -51,6 +52,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _probeScheduled = false;
   bool _isProbing = false;
   bool _probePending = false;
+
+  /// The probe round currently in flight, if any, so a pull-to-refresh can wait
+  /// for it instead of stacking a second round on top of the first.
+  Future<void>? _probeRound;
   DateTime? _lastProbeAt;
   Set<String> _lastProbedHostIds = const <String>{};
   DateTime? _lastExitAttemptAt;
@@ -140,9 +145,18 @@ class _HomePageState extends ConsumerState<HomePage> {
   /// 探测以 [_probeConcurrency] 为上限并发执行：一台不可达主机不再拖累其后的
   /// 所有主机（审计问题 rob-3），同时打开的 SSH 会话数仍然很少。失败按主机
   /// 隔离：单台主机失败不会中断整轮探测，也不会影响并发中的其他主机。
-  Future<void> _probeHosts(List<Host> hosts) async {
-    if (_isProbing) return;
+  Future<void> _probeHosts(List<Host> hosts) {
+    // The round already running is returned rather than replaced: a caller that
+    // awaited this expecting statuses to be fresh would otherwise resume while
+    // the only round that could have refreshed them is still going.
+    if (_isProbing) return _probeRound ?? Future<void>.value();
     _isProbing = true;
+    final round = _runProbeRound(hosts);
+    _probeRound = round;
+    return round;
+  }
+
+  Future<void> _runProbeRound(List<Host> hosts) async {
     try {
       final credentials = await ref.read(credentialListProvider.future);
       final credMap = {for (final c in credentials) c.id: c};
@@ -273,8 +287,28 @@ class _HomePageState extends ConsumerState<HomePage> {
       await Future.wait([for (var i = 0; i < _probeConcurrency; i++) worker()]);
     } finally {
       _isProbing = false;
+      _probeRound = null;
       _resumePendingProbe();
     }
+  }
+
+  /// Runs a probe round that the rebuild throttle does not get to refuse, and
+  /// waits for it.
+  ///
+  /// The throttle exists to keep ordinary rebuilds from launching rounds. A pull
+  /// is not an ordinary rebuild: it is the user asking a direct question, and
+  /// before this the answer was often "nothing" — a pull within 30 s of launch
+  /// started no round at all, and one after it stopped the spinner before the
+  /// round it appeared to be waiting for had finished, so statuses flipped a
+  /// second later with nothing on screen to explain why.
+  Future<void> _refreshHostStatuses(List<Host> hosts) async {
+    if (hosts.isEmpty) return;
+    // Let any round already in flight finish first, so the round below is not
+    // refused by the guard above.
+    await _probeRound;
+    // Cleared so the throttle cannot swallow the round this pull is asking for.
+    _lastProbeAt = null;
+    await _probeHosts(hosts);
   }
 
   /// Re-arms a probe when the host set changed while a round was in flight.
@@ -381,7 +415,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                     color: cs.primary,
                     onRefresh: () async {
                       ref.invalidate(hostListProvider);
-                      await ref.read(hostListProvider.future);
+                      final fresh = await ref.read(hostListProvider.future);
+                      // The spinner covers the probe too, so it stops when the
+                      // statuses on screen are the ones this pull produced.
+                      if (mounted) await _refreshHostStatuses(fresh);
                     },
                     // The overview card, the section headers and the group
                     // headers all live inside the list, from the same
@@ -476,6 +513,26 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
               const SizedBox(height: 16),
               const Divider(height: 1),
+              // A shell first. This sheet used to offer detail / edit / delete,
+              // and a shell was four taps away — into the console, which opens a
+              // monitoring session of its own, down past the identity card and
+              // the resource panel to the function grid, then a second full SSH
+              // connect. For a server tool that is the main thing people came to
+              // do, sitting behind the least important one.
+              HostActionRow(
+                icon: Icons.terminal,
+                label: t('open_terminal'),
+                color: cs.primary,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SshTerminalPage(host: host),
+                    ),
+                  );
+                },
+              ),
               HostActionRow(
                 icon: Icons.open_in_new,
                 label: t('host_detail'),
@@ -483,6 +540,18 @@ class _HomePageState extends ConsumerState<HomePage> {
                 onTap: () {
                   Navigator.pop(ctx);
                   _navigateToConsole(context, host);
+                },
+              ),
+              HostActionRow(
+                icon: Icons.copy,
+                label: '${t('copy')} ${t('ip_address')}',
+                color: cs.onSurface.withValues(alpha: 0.72),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Clipboard.setData(ClipboardData(text: host.ipAddress));
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text(t('copied'))));
                 },
               ),
               HostActionRow(
@@ -530,10 +599,25 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
     if (!confirmed) return;
 
-    ref.read(hostListProvider.notifier).deleteItem(host.id);
+    await ref.read(hostListProvider.notifier).deleteItem(host.id);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(t('host_deleted'))));
+    // Undo, because the delete is otherwise final: the confirmation stands
+    // between a mistap and the loss, but the sheet rows sit close together and
+    // the host config is not reconstructible from anything else on the device.
+    // `addItem` inserts with `ConflictAlgorithm.replace`, so re-inserting the
+    // same [Host] restores it under its original id — no new capability needed,
+    // and anything referencing that id finds it again.
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(t('host_deleted')),
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: t('undo'),
+            onPressed: () => ref.read(hostListProvider.notifier).addItem(host),
+          ),
+        ),
+      );
   }
 }

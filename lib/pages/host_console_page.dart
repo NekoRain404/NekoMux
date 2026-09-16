@@ -101,6 +101,10 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
   /// 当前运行中的 tick，好让手动刷新等待它，而不是再起一个、或谎报刷新成功。
   Future<bool>? _tickInFlight;
 
+  /// True while [_handleRefresh] is running, so the app bar can show it and
+  /// refuse a second one.
+  bool _refreshInFlight = false;
+
   /// The newest connection attempt.
   /// 最新的连接尝试。
   ///
@@ -542,18 +546,30 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
 
   /// Re-polls when live, reconnects otherwise.
   /// 实时时重新轮询，否则重新连接。
+  ///
+  /// Guarded, because the button it is wired to is disabled while it runs: a
+  /// second call would run a second pair of commands against the same
+  /// connection, and the pair this one is waiting on would then be reported
+  /// twice.
   Future<void> _handleRefresh() async {
-    final messenger = ScaffoldMessenger.of(context);
-    if (_isLive) {
-      await _refreshResources();
-      return;
+    if (_refreshInFlight) return;
+    _refreshInFlight = true;
+    if (mounted) setState(() {});
+    try {
+      final messenger = ScaffoldMessenger.of(context);
+      if (_isLive) {
+        await _refreshResources();
+        return;
+      }
+      await _retryMonitoring();
+      // A retry that failed has already reported itself; a confirmation here
+      // would contradict it.
+      if (!mounted || !_isLive) return;
+      messenger.showSnackBar(SnackBar(content: Text(t('resource_refreshed'))));
+    } finally {
+      _refreshInFlight = false;
+      if (mounted) setState(() {});
     }
-    await _retryMonitoring();
-    // A retry that failed has already reported itself; a confirmation here
-    // would contradict it.
-    // 失败的重试已经自行报告过；此处再确认一次只会与之矛盾。
-    if (!mounted || !_isLive) return;
-    messenger.showSnackBar(SnackBar(content: Text(t('resource_refreshed'))));
   }
 
   /// Waits for fresh numbers and confirms them.
@@ -633,7 +649,7 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
               connecting: _connecting,
               live: _isLive,
               onBack: () => Navigator.pop(context),
-              onRefresh: _handleRefresh,
+              onRefresh: _refreshInFlight ? null : _handleRefresh,
             ),
             SliverToBoxAdapter(
               child: HostConsoleIdentityCard(
