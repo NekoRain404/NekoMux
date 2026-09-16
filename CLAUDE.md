@@ -11,6 +11,12 @@ before adding to it — extract a service, a widget, or a set of pure helpers in
 their own file. Do not split by copying a block out and leaving the rest behind;
 move a coherent unit.
 
+**Comments are written in English only.** This replaced the earlier bilingual
+(English + Chinese) convention on 2026-09-16. Write new comments, doc comments
+and TODOs in English; do not add a Chinese line. Existing bilingual comments are
+left as they are — do not mass-convert them, and do not add Chinese to a comment
+you are already editing.
+
 **Run `flutter analyze` and `flutter test` before claiming a change works.** Both
 must be clean. The project had zero tests until 2026-09-15; new logic that can be
 tested in isolation should get a test.
