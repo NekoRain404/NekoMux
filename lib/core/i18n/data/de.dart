@@ -265,8 +265,10 @@ const Map<String, String> deStrings = <String, String>{
   'selected_count': '{0} ausgewählt',
   'batch_delete_confirm':
       'Die folgenden {0} Dateien löschen?\n\n{1}\n\nDieser Vorgang kann nicht rückgängig gemacht werden.',
+  'batch_delete_confirm_folders': '{0} ausgewählte Einträge werden gelöscht, Ordner samt Inhalt. Nicht rückgängig zu machen:\n{1}',
   'confirm_delete_file':
       '"{0}" löschen? Dieser Vorgang kann nicht rückgängig gemacht werden.',
+  'confirm_delete_folder': 'Ordner "{0}" und seinen gesamten Inhalt löschen? Das kann nicht rückgängig gemacht werden.',
   'upload_dev': 'Upload-Funktion in Entwicklung',
   'file_saved': 'Datei gespeichert',
   'file_created': 'Datei erstellt',

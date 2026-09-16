@@ -265,7 +265,9 @@ const Map<String, String> frStrings = <String, String>{
   'selected_count': '{0} sélectionné(s)',
   'batch_delete_confirm':
       'Supprimer les {0} fichiers suivants ?\n\n{1}\n\nCette action est irréversible.',
+  'batch_delete_confirm_folders': '{0} éléments sélectionnés seront supprimés, les dossiers avec leur contenu. Action irréversible :\n{1}',
   'confirm_delete_file': 'Supprimer "{0}" ? Cette action est irréversible.',
+  'confirm_delete_folder': 'Supprimer le dossier "{0}" et tout son contenu ? Cette action est irréversible.',
   'upload_dev': 'Fonction de téléversement en développement',
   'file_saved': 'Fichier enregistré',
   'file_created': 'Fichier créé',

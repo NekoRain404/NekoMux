@@ -198,12 +198,22 @@ class _SftpNameDialogState extends State<_SftpNameDialog> {
 }
 
 /// Confirms deleting a single entry by [name].
-/// 确认删除名为 [name] 的单个条目。
-Future<bool> confirmSftpDelete(BuildContext context, String name) {
+///
+/// A directory says what it is about to do. Deleting a folder is now a recursive
+/// walk — the only way "delete this folder" can work at all, since `rmdir`
+/// refuses a non-empty one — so a dialog that named the folder without saying
+/// its contents go with it would be describing a smaller action than the one it
+/// authorises.
+Future<bool> confirmSftpDelete(
+  BuildContext context,
+  String name, {
+  bool isDirectory = false,
+}) {
   return showAppConfirmDialog(
     context,
     title: t('confirm_delete'),
-    message: t('confirm_delete_file').replaceAll('{0}', name),
+    message: (isDirectory ? t('confirm_delete_folder') : t('confirm_delete_file'))
+        .replaceAll('{0}', name),
     cancelLabel: t('cancel'),
     confirmLabel: t('delete'),
     destructive: true,
@@ -211,14 +221,23 @@ Future<bool> confirmSftpDelete(BuildContext context, String name) {
 }
 
 /// Confirms deleting every path in [paths], naming them in the message.
-/// 确认删除 [paths] 中的每一个路径，并在正文中列出名称。
-Future<bool> confirmSftpBatchDelete(BuildContext context, List<String> paths) {
+///
+/// [includesDirectory] picks the wording: a selection containing a folder will
+/// take that folder's contents with it, and the confirmation has to say so or it
+/// describes a smaller action than the one it authorises.
+Future<bool> confirmSftpBatchDelete(
+  BuildContext context,
+  List<String> paths, {
+  bool includesDirectory = false,
+}) {
   final names = sftpJoinedNames(paths);
   return showAppConfirmDialog(
     context,
     title: t('batch_delete'),
     message: t(
-      'batch_delete_confirm',
+      includesDirectory
+          ? 'batch_delete_confirm_folders'
+          : 'batch_delete_confirm',
     ).replaceAll('{0}', paths.length.toString()).replaceAll('{1}', names),
     cancelLabel: t('cancel'),
     confirmLabel: t('delete'),

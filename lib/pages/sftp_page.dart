@@ -661,15 +661,27 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     final service = _sftpService;
     final paths = _selection.paths.toList();
     if (service == null || paths.isEmpty) return;
+    // From the listing, so a ticked directory is known to be one and can be
+    // walked: the selection carries only paths, and a path cannot say whether
+    // removing it needs a recursive delete or a single call.
+    final entries = [
+      for (final path in paths)
+        ..._files.where((file) => file.path == path),
+    ];
+    if (entries.isEmpty) return;
 
-    final confirmed = await confirmSftpBatchDelete(context, paths);
+    final confirmed = await confirmSftpBatchDelete(
+      context,
+      paths,
+      includesDirectory: entries.any((entry) => entry.isDirectory),
+    );
     if (!confirmed || !mounted) return;
 
     setState(_selection.clear);
     await deleteSftpEntries(
       context,
       service: service,
-      paths: paths,
+      entries: entries,
       notify: _showSnack,
     );
     if (!mounted) return;

@@ -263,7 +263,9 @@ const Map<String, String> enStrings = <String, String>{
   'selected_count': '{0} selected',
   'batch_delete_confirm':
       'Delete the following {0} files?\n\n{1}\n\nThis action cannot be undone.',
+  'batch_delete_confirm_folders': '{0} selected entries will be deleted, folders together with their contents. This action cannot be undone:\n{1}',
   'confirm_delete_file': 'Delete "{0}"? This action cannot be undone.',
+  'confirm_delete_folder': 'Delete the folder "{0}" and everything inside it? This action cannot be undone.',
   'upload_dev': 'Upload feature in development',
   'file_saved': 'File saved',
   'file_created': 'File created',

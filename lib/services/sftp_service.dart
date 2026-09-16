@@ -7,6 +7,7 @@ import '../models/file_item.dart';
 import 'host_key_verifier.dart';
 import 'sftp_failure.dart';
 import 'sftp_format.dart';
+import 'sftp_tree.dart';
 import 'sftp_guards.dart';
 import 'ssh_service.dart';
 
@@ -23,7 +24,7 @@ export 'sftp_failure.dart';
 /// Provides list, read, write, delete, rename, and mkdir operations
 /// over an authenticated SSH transport.
 /// 在已认证的 SSH 传输层上提供列表、读取、写入、删除、重命名和创建目录操作。
-class SftpService {
+class SftpService implements SftpTreeOps {
   /// Target host configuration.
   /// 目标主机配置。
   final Host host;
@@ -245,6 +246,7 @@ class SftpService {
   ///
   /// Sorted: directories first, then files; each group alphabetically. Turning a
   /// listing into those rows is [listingItems]' job, not this method's.
+  @override
   Future<List<FileItem>> listDirectory(String path) async {
     _ensureConnected();
     try {
@@ -578,6 +580,7 @@ class SftpService {
   ///
   /// Tries rmdir first (for directories), then falls back to remove (for files).
   /// 先尝试 rmdir（目录），失败则回退到 remove（文件）。
+  @override
   Future<void> deleteFile(String path) async {
     _ensureConnected();
     try {

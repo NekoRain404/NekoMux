@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/i18n/strings.dart';
 import '../../models/file_item.dart';
 import '../../services/sftp_service.dart';
+import '../../services/sftp_tree.dart';
 import '../../widgets/app_ui.dart';
 import 'sftp_dialogs.dart';
 import 'sftp_error_text.dart';
@@ -57,16 +58,36 @@ Future<void> deleteSftpEntry(
   required FileItem file,
   required void Function(String message, {bool isError}) notify,
 }) async {
-  final confirmed = await confirmSftpDelete(context, file.name);
+  final confirmed = await confirmSftpDelete(
+    context,
+    file.name,
+    isDirectory: file.isDirectory,
+  );
   if (!confirmed) return;
 
-  try {
-    await service.deleteFile(file.path);
+  // A directory is walked, not removed in one call: `deleteFile` removes a file
+  // or an *empty* directory, so a folder with anything in it failed outright —
+  // "delete this folder" was not a thing the app could do.
+  final result = await deleteTree(
+    service,
+    file.path,
+    isDirectory: file.isDirectory,
+  );
+  if (result.complete) {
     notify(t('file_deleted'), isError: false);
-  } on SftpException catch (e) {
-    notify(sftpErrorText(e), isError: true);
+    return;
   }
+  notify(_treeFailureText(result.failure!), isError: true);
 }
+
+/// The message for a walk that stopped early.
+///
+/// `deleteTree` reports whatever the connection threw, which for this app is an
+/// [SftpException] and carries a code worth mapping; anything else is reported
+/// as a failed delete with its detail rather than printed raw.
+String _treeFailureText(Object failure) => failure is SftpException
+    ? sftpErrorText(failure)
+    : sftpFailureText(SftpFailure.delete, '$failure');
 
 /// The "new file / new folder" flow: choose a kind, name it, create it.
 ///
@@ -117,7 +138,12 @@ Future<void> createSftpEntry(
   }
 }
 
-/// Deletes every path in [paths], then reports what actually happened.
+/// Deletes every entry in [entries], then reports what actually happened.
+///
+/// Takes the entries rather than their paths because a directory has to be
+/// walked: a ticked folder used to be removed with a single `deleteFile`, which
+/// fails on anything non-empty — so a batch could report "failed 1/3" for the
+/// one entry the user was most deliberate about.
 ///
 /// Returns the number of failures, so the caller can decide whether the listing
 /// it is about to reload is still worth showing.
@@ -127,16 +153,21 @@ Future<void> createSftpEntry(
 Future<int> deleteSftpEntries(
   BuildContext context, {
   required SftpService service,
-  required List<String> paths,
+  required List<FileItem> entries,
   required void Function(String message, {bool isError}) notify,
 }) async {
   var failed = 0;
-  for (final path in paths) {
+  for (final entry in entries) {
     try {
-      await service.deleteFile(path);
-    } on SftpException catch (e) {
-      failed++;
-      notify(sftpErrorText(e), isError: true);
+      final result = await deleteTree(
+        service,
+        entry.path,
+        isDirectory: entry.isDirectory,
+      );
+      if (!result.complete) {
+        failed++;
+        notify(_treeFailureText(result.failure!), isError: true);
+      }
     } catch (e) {
       failed++;
       // Not an SftpException, so there is no code to map; report it as a failed
@@ -154,7 +185,7 @@ Future<int> deleteSftpEntries(
     notify(
       t('service_action_failed')
           .replaceAll('{0}', t('batch_delete'))
-          .replaceAll('{1}', '$failed/${paths.length}'),
+          .replaceAll('{1}', '$failed/${entries.length}'),
       isError: true,
     );
   }

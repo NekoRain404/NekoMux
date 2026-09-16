@@ -263,7 +263,9 @@ const Map<String, String> ruStrings = <String, String>{
   'selected_count': 'Выбрано: {0}',
   'batch_delete_confirm':
       'Удалить следующие {0} файлов?\n\n{1}\n\nЭто действие необратимо.',
+  'batch_delete_confirm_folders': 'Будет удалено выбранных записей: {0}; папки — вместе с содержимым. Необратимо:\n{1}',
   'confirm_delete_file': 'Удалить "{0}"? Это действие необратимо.',
+  'confirm_delete_folder': 'Удалить папку «{0}» и всё её содержимое? Это действие необратимо.',
   'upload_dev': 'Функция загрузки в разработке',
   'file_saved': 'Файл сохранён',
   'file_created': 'Файл создан',

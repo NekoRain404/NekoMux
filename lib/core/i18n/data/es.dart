@@ -262,7 +262,9 @@ const Map<String, String> esStrings = <String, String>{
   'selected_count': '{0} seleccionado(s)',
   'batch_delete_confirm':
       '¿Eliminar los siguientes {0} archivos?\n\n{1}\n\nEsta acción no se puede deshacer.',
+  'batch_delete_confirm_folders': 'Se eliminarán {0} elementos seleccionados; las carpetas con todo su contenido. No se puede deshacer:\n{1}',
   'confirm_delete_file': '¿Eliminar "{0}"? Esta acción no se puede deshacer.',
+  'confirm_delete_folder': '¿Eliminar la carpeta "{0}" y todo su contenido? Esta acción no se puede deshacer.',
   'upload_dev': 'Función de carga en desarrollo',
   'file_saved': 'Archivo guardado',
   'file_created': 'Archivo creado',
