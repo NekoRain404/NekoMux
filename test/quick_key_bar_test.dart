@@ -160,6 +160,31 @@ void main() {
       expect(find.text('{}'), findsNothing);
     });
 
+    testWidgets('the paste pill appears only when it has a callback', (
+      tester,
+    ) async {
+      // Same shape as the snippets pill above, and for the same reason: a pill
+      // drawn without a callback is a key that looks tappable and does nothing,
+      // and this one is hidden while the shell is disconnected precisely
+      // because pasting into nothing has no visible outcome.
+      useWideSurface(tester);
+      var pasteTaps = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: QuickKeyBar(onPasteTap: () => pasteTaps++)),
+        ),
+      );
+
+      await tester.tap(find.text('📋'));
+      expect(pasteTaps, 1);
+
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: QuickKeyBar())),
+      );
+      expect(find.text('📋'), findsNothing);
+    });
+
     testWidgets('a bar with no callbacks still renders and ignores taps', (
       tester,
     ) async {

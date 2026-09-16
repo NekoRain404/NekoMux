@@ -21,6 +21,7 @@ import 'console/ssh_error_text.dart';
 import 'snippet_injection_dialog.dart';
 import 'snippet_list_page.dart';
 import 'terminal/snippets_sheet.dart';
+import 'terminal/terminal_theme.dart';
 
 /// Fallback terminal font size, used until the settings row has loaded and if
 /// it is ever absent. Matches `AppSettings.terminalFontSize`'s own default so
@@ -253,35 +254,14 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
   /// 已打开的终端的缘故。缓存的视图会一直保持打开页面当时的字号，设置看起来毫无
   /// 作用直到下次进入——那和一个坏掉的设置无从区分。
   TerminalView _terminalViewFor(double fontSize) {
+    // The palette follows the app theme — see [terminalThemeFor] for why the
+    // ANSI colours are the one part that does not.
+    final brightness = Theme.of(context).brightness;
     return TerminalView(
       _terminal,
       controller: _terminalController,
       textStyle: TerminalStyle(fontSize: fontSize),
-      theme: TerminalTheme(
-        cursor: const Color(0xFFFFFFFF),
-        foreground: const Color(0xFFC9D1D9),
-        background: Colors.black,
-        black: const Color(0xFF484D56),
-        red: const Color(0xFFF85149),
-        green: const Color(0xFF3FB950),
-        yellow: const Color(0xFFD29922),
-        blue: const Color(0xFF58A6FF),
-        magenta: const Color(0xFFBC8CFF),
-        cyan: const Color(0xFF39C5CF),
-        white: const Color(0xFFB1BAC4),
-        brightBlack: const Color(0xFF6E7681),
-        brightRed: const Color(0xFFFFA198),
-        brightGreen: const Color(0xFF56D364),
-        brightYellow: const Color(0xFFE3B341),
-        brightBlue: const Color(0xFF79C0FF),
-        brightMagenta: const Color(0xFFD2A8FF),
-        brightCyan: const Color(0xFF56D4DD),
-        brightWhite: const Color(0xFFF0F6FC),
-        searchHitBackground: const Color(0xFF264F78),
-        searchHitBackgroundCurrent: const Color(0xFF58A6FF),
-        searchHitForeground: const Color(0xFFFFFFFF),
-        selection: const Color(0xFF264F78),
-      ),
+      theme: terminalThemeFor(Theme.of(context).colorScheme, brightness),
       padding: const EdgeInsets.all(8),
       onSecondaryTapDown: (details, offset) => _copySelection(),
     );
@@ -379,6 +359,7 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
                 QuickKeyBar(
                   onKeyTap: _onQuickKey,
                   onSnippetsTap: _isConnected ? _showSnippets : null,
+                  onPasteTap: _isConnected ? _pasteFromClipboard : null,
                 ),
               ],
             ),
@@ -569,6 +550,28 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
 
   bool get _isConnected => _connState == SshConnectionState.connected;
 
+  /// Sends the clipboard's text to the shell, as if typed.
+  ///
+  /// Copy existed and paste did not, which is the wrong half for a phone: the
+  /// commands worth running (a long apt line, a curl from a wiki, a token) are
+  /// written somewhere else and arrive through the clipboard. Retyping them on
+  /// a soft keyboard is the alternative, and it is why they simply were not run.
+  ///
+  /// Routed through `Terminal.paste`, not `sendText`: paste brackets the payload
+  /// when the remote enabled bracketed-paste mode, which is what stops a
+  /// multi-line paste from executing line by line in a shell that asked for it.
+  Future<void> _pasteFromClipboard() async {
+    if (!_isConnected) return;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    // An empty clipboard is a no-op rather than a message: the user tapped a
+    // key, and the key's whole job is to move whatever is on the clipboard.
+    if (text == null || text.isEmpty) return;
+    if (!mounted) return;
+    _terminal.paste(text);
+    hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.light);
+  }
+
   void _copySelection() {
     final selection = _terminalController.selection;
     if (selection == null) return;
@@ -669,13 +672,19 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
     _connection?.sendText('$command\n');
   }
 
-  /// Opens the snippet manager page.
-  /// 打开片段管理页。
-  void _openSnippetManager() {
-    Navigator.push(
+  /// Opens the snippet manager, and runs whatever the user picks there.
+  ///
+  /// [SnippetListPage] is both a manager and a picker: tapping a row pops the
+  /// page with the snippet as its result. This call used to drop that result on
+  /// the floor, so the tap visibly closed the page and then nothing happened —
+  /// the same tap that works from the `{}` sheet did nothing from the manager.
+  Future<void> _openSnippetManager() async {
+    final picked = await Navigator.push<Snippet>(
       context,
       MaterialPageRoute(builder: (_) => const SnippetListPage()),
     );
+    if (picked == null || !mounted) return;
+    await _injectSnippet(picked);
   }
 }
 

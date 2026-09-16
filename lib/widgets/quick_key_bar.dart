@@ -50,7 +50,16 @@ class QuickKeyBar extends StatelessWidget {
   final void Function(String label, String sequence)? onKeyTap;
   final VoidCallback? onSnippetsTap;
 
-  const QuickKeyBar({super.key, this.onKeyTap, this.onSnippetsTap});
+  /// Invoked by the clipboard pill. Null hides it — pasting into a shell that
+  /// is not connected would silently go nowhere.
+  final VoidCallback? onPasteTap;
+
+  const QuickKeyBar({
+    super.key,
+    this.onKeyTap,
+    this.onSnippetsTap,
+    this.onPasteTap,
+  });
 
   /// The keys, in bar order, split into groups that [_GroupDivider] separates.
   /// 按键按栏内顺序排列，分组之间由 [_GroupDivider] 分隔。
@@ -166,6 +175,18 @@ class QuickKeyBar extends StatelessWidget {
                 tooltip: t('snippets'),
                 color: colorScheme.primary,
                 onTap: onSnippetsTap,
+              ),
+              _GroupDivider(color: dividerColor),
+            ],
+            // Paste leads the bar, before the character keys: it is the one pill
+            // that brings in text from outside the app entirely, and the text it
+            // brings is usually the command the user actually came to run.
+            if (onPasteTap != null) ...[
+              _KeyPill(
+                label: '📋',
+                tooltip: t('paste'),
+                color: colorScheme.primary,
+                onTap: onPasteTap,
               ),
               _GroupDivider(color: dividerColor),
             ],
