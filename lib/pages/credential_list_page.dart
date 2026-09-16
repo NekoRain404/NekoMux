@@ -56,17 +56,13 @@ class CredentialListPage extends ConsumerWidget {
       body: credsAsync.when(
         loading: () =>
             Center(child: CircularProgressIndicator(color: cs.primary)),
-        error: (e, _) => Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-            child: Text(
-              '${t('error')}: $e',
-              textAlign: TextAlign.center,
-              maxLines: 6,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
-            ),
-          ),
+        // With a retry, like every other table-backed screen. This one was
+        // missed when the others got theirs, and it is the screen a user is on
+        // when the credential store itself is what failed — the one failure that
+        // most needs a second attempt.
+        error: (e, _) => AppLoadFailure(
+          detail: t('load_failed_msg').replaceAll('{0}', '$e'),
+          onRetry: () => ref.invalidate(credentialListProvider),
         ),
         data: (creds) {
           if (creds.isEmpty) {

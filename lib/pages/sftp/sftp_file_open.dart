@@ -69,6 +69,12 @@ Future<void> openSftpTextFile(
         filename: file.name,
         content: content,
         onSave: (newContent) async {
+          // Rethrown after being reported, and the preview page depends on
+          // that: it marks the buffer as saved on a normal return, so a failed
+          // write that returned quietly cleared the unsaved-changes badge and
+          // stopped warning on the way out — the page then said "saved" while
+          // the server had the old contents, and leaving lost the edit without
+          // a word.
           try {
             await service.writeFile(
               file.path,
@@ -77,6 +83,7 @@ Future<void> openSftpTextFile(
             notify(t('file_saved'), isError: false);
           } on SftpException catch (e) {
             notify(sftpErrorText(e), isError: true);
+            rethrow;
           }
         },
       ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/i18n/strings.dart';
+
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry margin;
@@ -285,4 +287,53 @@ Future<bool> showAppConfirmDialog(
     ),
   );
   return result ?? false;
+}
+
+/// A failed load, with the way out of it.
+///
+/// Every table-backed screen in this app can fail to read: a database that is
+/// not open yet, a connection that went away, a credential store the platform
+/// refused. What a user needs at that moment is the reason and a button — the
+/// pattern `known_hosts_page.dart` established and Settings, the credential list
+/// and the file manager each arrived at separately. This is that pattern once,
+/// so a new screen gets the retry by using it rather than by remembering to.
+class AppLoadFailure extends StatelessWidget {
+  /// Why the load failed, already localised.
+  final String detail;
+
+  /// Runs the load again. Null leaves the button off, for a failure nothing can
+  /// retry.
+  final VoidCallback? onRetry;
+
+  const AppLoadFailure({super.key, required this.detail, this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              detail,
+              textAlign: TextAlign.center,
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: onRetry,
+                icon: Icon(Icons.refresh, color: cs.secondary, size: 18),
+                label: Text(t('retry'), style: TextStyle(color: cs.secondary)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }

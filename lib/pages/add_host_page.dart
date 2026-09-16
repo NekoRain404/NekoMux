@@ -256,19 +256,29 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
       return;
     }
 
+    // The credential must still exist *now*, not merely have been chosen once.
+    // The dropdown clears a stale selection, but only on its own branch: with
+    // every credential deleted — or with the list still in its error state —
+    // that branch never runs, no dropdown is drawn, so its validator never runs
+    // either, and the id below was written back to the database. The host then
+    // could never connect again and nothing on screen said why.
     final creds = ref.read(credentialListProvider).value ?? [];
     final matched = creds
         .where((c) => c.id == _selectedCredentialId)
         .firstOrNull;
+    if (matched == null) {
+      _showResult(t('credential_not_found'), isError: true);
+      return;
+    }
 
     final host = Host(
       id: _isEditing ? widget.existingHost!.id : const Uuid().v4(),
       alias: _aliasController.text.trim(),
       ipAddress: _ipController.text.trim(),
       port: int.parse(_portController.text.trim()),
-      credentialId: _selectedCredentialId!,
-      credentialName: matched?.name,
-      credentialUsername: matched?.username,
+      credentialId: matched.id,
+      credentialName: matched.name,
+      credentialUsername: matched.username,
       osType: _osType,
       groupName: Host.normalizeGroupName(_groupController.text),
       isOnline: widget.existingHost?.isOnline ?? false,

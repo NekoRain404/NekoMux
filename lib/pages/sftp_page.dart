@@ -7,16 +7,13 @@ import '../core/i18n/strings.dart';
 import '../models/credential.dart';
 import '../models/file_item.dart';
 import '../models/host.dart';
-import '../providers/providers.dart';
-import '../providers/ssh_provider.dart';
 import '../providers/transfer_provider.dart';
-import '../services/host_key_trust.dart';
 import '../services/sftp_service.dart';
 import '../widgets/app_ui.dart';
-import '../widgets/host_key_prompt.dart';
 import 'sftp/directory_load_state.dart';
 import 'sftp/file_selection.dart';
 import 'sftp/sftp_bars.dart';
+import 'sftp/sftp_connection_mixin.dart';
 import 'sftp/sftp_dialogs.dart';
 import 'sftp/sftp_error_text.dart';
 import 'sftp/sftp_file_list.dart';
@@ -50,10 +47,17 @@ class SftpPage extends ConsumerStatefulWidget {
   ConsumerState<SftpPage> createState() => _SftpPageState();
 }
 
-class _SftpPageState extends ConsumerState<SftpPage> {
-  SftpService? _sftpService;
-  bool _isConnecting = true;
-  String? _errorMessage;
+class _SftpPageState extends ConsumerState<SftpPage>
+    with SftpConnectionState<SftpPage> {
+  @override
+  Host get host => widget.host;
+
+  @override
+  Credential? get initialCredential => widget.credential;
+
+  @override
+  Future<void> loadRootDirectory() => _loadDirectory('/');
+
   List<FileItem> _files = [];
 
   /// Directory bookkeeping: which path the bar shows, which one the entries in
@@ -76,185 +80,21 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// 取代它——那会连带丢掉用户仍然可以操作的目录。
   bool _hasListingOnScreen = false;
 
-  /// True when the transport died under this page rather than a single
-  /// operation failing.
-  ///
-  /// Separate from [_errorMessage] because the two states are shown in different
-  /// places: a failed listing is a snackbar over a listing that is still true,
-  /// while a session that is over needs the full-page reconnect view — every
-  /// later operation will fail the same way, and the listing on screen is now
-  /// a picture of how things were.
-  bool _sessionLost = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _resolveAndConnect());
+    WidgetsBinding.instance.addPostFrameCallback((_) => resolveAndConnect());
   }
 
   @override
   void dispose() {
-    _sftpService?.disconnect();
+    sftpService?.disconnect();
     super.dispose();
   }
 
   /// Resolves the credential and the host-key trust record, then connects.
   /// 解析凭据与主机密钥信任记录，然后建立连接。
-  Future<void> _resolveAndConnect() async {
-    var cred = widget.credential;
-    try {
-      if (cred == null) {
-        final allCreds = await ref.read(credentialListProvider.future);
-        if (!mounted) return;
-        cred = allCreds
-            .where((c) => c.id == widget.host.credentialId)
-            .firstOrNull;
-      }
-      if (cred == null) {
-        setState(() {
-          _isConnecting = false;
-          _errorMessage = t('credential_not_found');
-        });
-        return;
-      }
-
-      // The accepted keys live in SQLite, so the verifier needs the database.
-      // The in-memory cache this replaced could not tell a changed key from a
-      // first contact and forgot every accepted key on restart, which is the
-      // same as not verifying at all.
-      // 已接受的密钥存放在 SQLite，因此验证器需要数据库实例。它取代的内存缓存既无法
-      // 区分「密钥变更」与「首次连接」，又会在每次重启后忘掉所有已接受的密钥——
-      // 那等于没有验证。
-      final db = await ref.read(databaseProvider.future);
-      if (!mounted) return;
-
-      _sftpService = SftpService(
-        host: widget.host,
-        credential: cred,
-        // Settings → connect timeout, honoured in full — deliberately not
-        // clamped the way the home page's background probe clamps it. The two
-        // cases are opposites: a probe runs against every host on every round
-        // with nobody watching, while this page opens exactly the one session
-        // the user asked for by tapping a host. Clamping here would recreate the
-        // defect being fixed — a user on a slow link who chose 30s would still
-        // be cut off at 4s — and the cost of obeying it is paid once per
-        // attempt, not per tick: a connect happens on open and on retry, both
-        // user-initiated.
-        // 设置 → 连接超时，在这里被完整遵循——刻意**不**像主页后台探测那样钳制。两者
-        // 恰好相反：探测每轮对每台主机执行且无人注视，而本页只打开用户点击主机所请求的
-        // 那一条会话。在此钳制会重新造出正在修复的缺陷——慢链路上的用户设了 30 秒，却
-        // 依然在 4 秒被切断——而遵循它的代价只按次支付，不按 tick 重复：连接只发生在
-        // 打开与重试时，全部由用户发起。
-        connectTimeout: ref.read(connectTimeoutProvider),
-        onHostKeyVerify: buildHostKeyVerifier(
-          db: db,
-          address: widget.host.ipAddress,
-          port: widget.host.port,
-          onPrompt: (fingerprint, verdict) async {
-            // Raised from inside connect(), so by the time a key needs judging
-            // the page may already be gone.
-            // 该提示由 connect() 内部触发，等到需要判定密钥时页面可能已销毁。
-            if (!mounted) return false;
-            return showHostKeyPrompt(
-              context,
-              fingerprint: fingerprint,
-              verdict: verdict,
-            );
-          },
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isConnecting = false;
-        // Nothing here reached the service, so there is no code to map — the
-        // failure is reported as a failed connection with the raw detail, which
-        // is what an unexpected exception can honestly offer.
-        // 这里的失败根本没有到达 service，因此没有编码可映射——按连接失败上报并附带
-        // 原始细节，这也是一份意外异常能诚实提供的信息。
-        _errorMessage = sftpFailureText(SftpFailure.connect, '$e');
-      });
-      return;
-    }
-    _connect();
-  }
-
-  /// Opens the connection and loads the root directory.
-  /// 建立连接并载入根目录。
-  Future<void> _connect() async {
-    setState(() {
-      _isConnecting = true;
-      _errorMessage = null;
-      _sessionLost = false;
-    });
-    try {
-      await _sftpService!.connect();
-      if (!mounted) {
-        // The page was popped while the session was opening. dispose() has
-        // already run — and ran before the service finished connecting, so it
-        // had nothing to close. Closing here is what keeps an abandoned SFTP
-        // page from leaving an authenticated session on the server until the
-        // app exits.
-        // 连接建立期间页面被返回销毁。dispose() 已经执行过，且执行时服务尚未连接完成，
-        // 因此它没有东西可关。在这里关闭，才能避免一个被放弃的 SFTP 页面在服务器上
-        // 留下已认证会话直到 App 结束。
-        await _sftpService?.disconnect();
-        return;
-      }
-      _watchSession();
-      await _loadDirectory('/');
-    } on SftpException catch (e) {
-      if (!mounted) return;
-      setState(() => _errorMessage = sftpErrorText(e));
-    } catch (e) {
-      if (!mounted) return;
-      setState(
-        () => _errorMessage = sftpFailureText(SftpFailure.connect, '$e'),
-      );
-    } finally {
-      // Guarded on purpose: connect() is awaited while the user can still press
-      // back, and an unguarded setState here throws on every such exit.
-      // 有意加守卫：connect() 等待期间用户仍可返回，未加守卫的 setState 会在这种
-      // 情况下抛异常。
-      if (mounted) setState(() => _isConnecting = false);
-    }
-  }
-
-  /// Reacts to the transport going away under a live page.
-  ///
-  /// Without this the page could only fail: a dead session makes every later
-  /// operation throw the same error, so browsing turned into a run of snackbars
-  /// with no reconnect and no explanation — while the terminal, which has had
-  /// this since it was written, put a single "disconnected" view with a retry in
-  /// front of the user. A deliberate [disconnect] resets the signal, so this
-  /// only fires for a session that ended on its own.
-  void _watchSession() {
-    final closed = _sftpService?.closed;
-    if (closed == null) return;
-    unawaited(
-      closed.then((_) {
-        if (!mounted || _isConnecting) return;
-        setState(() {
-          _sessionLost = true;
-          // Shown by the status view, which takes over the body: the listing is
-          // kept in [_files] so reconnecting brings it straight back, and
-          // [_errorMessage] carries the reason the user reads while it is down.
-          _errorMessage = t('disconnected');
-        });
-      }),
-    );
-  }
-
-  /// Retries from the error page: drop the old session, then connect again.
-  /// 从错误页重试：断开旧会话后重新连接。
-  Future<void> _retry() async {
-    await _sftpService?.disconnect();
-    if (!mounted) return;
-    await _resolveAndConnect();
-  }
-
-  /// The directory the page is showing, in the path bar and for building paths.
-  /// 页面正在显示的目录，用于路径栏，也用于拼接子路径。
   String get _currentDir => _directory.requestedPath;
 
   /// What a batch download of the ticked entries would queue, and what it cannot.
@@ -295,14 +135,14 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     // `TypeError`，由泛化的 `catch` 转成「列举失败: Null check operator used on a null
     // value」：唯一告诉用户该修什么的那句话，被一句什么都没说的替代了。保持错误状态不变
     // 才是诚实的答案——原因已经在屏幕上，而「重试」是离开它的出口。
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return;
 
     final request = _directory.begin(path);
     final changesDirectory = path != _directory.shownPath;
 
     setState(() {
-      _errorMessage = null;
+      errorMessage = null;
       // A batch action must never reach a path the user can no longer see, so
       // changing directory drops the selection. A plain refresh keeps it.
       // 批量操作绝不能触及用户已经看不到的路径，因此切换目录会清空选择；单纯刷新则保留。
@@ -344,7 +184,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
       // show; with a listing on screen it would be swallowed entirely.
       // 只有确实无内容可显示时，整页错误才是恰当的报告方式；列表还在屏幕上时它会被
       // 完全吞掉。
-      if (!canKeepListing) _errorMessage = message;
+      if (!canKeepListing) errorMessage = message;
     });
     if (canKeepListing) _showSnack(message, isError: true);
   }
@@ -377,7 +217,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// server's paths are known to the person managing it, so the app asks rather
   /// than making them scroll.
   Future<void> _promptForPath() async {
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return;
 
     final resolved = await promptForRemotePath(
@@ -407,7 +247,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// [openSftpTextFile]; what stays here is the choice between previewing and
   /// showing the actions sheet, which is the page's own decision.
   Future<void> _openFile(FileItem file) async {
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return;
     await openSftpTextFile(
       context,
@@ -498,7 +338,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// `access.log`). Only names that already exist are counted, so the question
   /// is asked when it is real rather than on every upload.
   Future<bool> _confirmUploadOverwrite(List<UploadPick> picks) async {
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return false;
 
     final clashing = <String>[];
@@ -618,7 +458,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// Renames [file] to the name the user types.
   /// 将 [file] 重命名为用户输入的名称。
   Future<void> _showRenameDialog(FileItem file) async {
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return;
     await renameSftpEntry(
       context,
@@ -638,7 +478,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// directory into a file — the mistake a bare `chmod`-style write would make
   /// against a mode that also carries the type.
   Future<void> _showPermissionsDialog(FileItem file) async {
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return;
 
     final mode = await showSftpChmodDialog(
@@ -661,7 +501,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// Deletes one entry after confirming.
   /// 确认后删除单个条目。
   Future<void> _confirmDeleteFile(FileItem file) async {
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return;
     await deleteSftpEntry(
       context,
@@ -680,7 +520,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// reloading the directory is this page's half, because it is the page that
   /// knows which directory the bar is showing.
   Future<void> _showNewEntryDialog() async {
-    final service = _sftpService;
+    final service = sftpService;
     if (service == null) return;
     await createSftpEntry(
       context,
@@ -695,7 +535,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// Deletes every selected path, then reports what actually happened.
   /// 删除全部已选路径，然后如实报告结果。
   Future<void> _showBatchDeleteConfirm() async {
-    final service = _sftpService;
+    final service = sftpService;
     final paths = _selection.paths.toList();
     if (service == null || paths.isEmpty) return;
     // From the listing, so a ticked directory is known to be one and can be
@@ -764,7 +604,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
           style: TextStyle(color: cs.onSurface),
         ),
         actions: [
-          if (!_isConnecting)
+          if (!isConnecting)
             IconButton(
               icon: Icon(
                 Icons.refresh,
@@ -776,7 +616,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
                   ? null
                   : () => _loadDirectory(_currentDir),
             ),
-          if (!_isConnecting)
+          if (!isConnecting)
             IconButton(
               icon: Icon(Icons.add, color: cs.secondary, size: 22),
               tooltip: t('new_file'),
@@ -800,13 +640,13 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     // drawing needs either of them.
     // 页面处于三种状态中的哪一种由这里决定——列表与加载状态都在这里；而每种状态长什么样
     // 不由这里决定，因为绘制它们不需要这两样中的任何一样。
-    if (_isConnecting ||
-        _sessionLost ||
-        (_errorMessage != null && _files.isEmpty)) {
+    if (isConnecting ||
+        sessionLost ||
+        (errorMessage != null && _files.isEmpty)) {
       return SftpStatusView(
-        isConnecting: _isConnecting,
-        errorMessage: _errorMessage,
-        onRetry: _retry,
+        isConnecting: isConnecting,
+        errorMessage: errorMessage,
+        onRetry: retryConnection,
       );
     }
 
@@ -823,7 +663,7 @@ class _SftpPageState extends ConsumerState<SftpPage> {
           isSelectionMode: _selection.isActive,
           onCancelSelection: _exitSelectionMode,
           onCrumbTap: _navigateToCrumb,
-          onEditPathTap: _sftpService == null ? null : _promptForPath,
+          onEditPathTap: sftpService == null ? null : _promptForPath,
         ),
         Divider(height: 1, color: Theme.of(context).dividerColor),
         Expanded(

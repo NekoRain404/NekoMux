@@ -11,6 +11,7 @@ import '../services/host_key_trust.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
+import 'tasks/process_detail_sheet.dart';
 import '../widgets/host_key_prompt.dart';
 import 'console/ssh_error_text.dart';
 import 'containers/remote_action_outcome.dart';
@@ -26,6 +27,14 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
   List<Map<String, dynamic>> _allProcesses = [];
   List<Map<String, dynamic>> _filtered = [];
   bool _loading = true;
+
+  /// PID a `kill` is currently running for, or null.
+  ///
+  /// The confirmation sheet closes before the command returns, so without this
+  /// the row stayed tappable for the up-to-ten seconds that `kill` takes and a
+  /// second visit issued a second signal — against a list that had not changed
+  /// yet, which is exactly what invites the second tap.
+  int? _pendingKill;
   String? _error;
   SshConnection? _conn;
   String _sortBy = 'cpu';
@@ -237,11 +246,21 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
   /// anyway, and the process was still running.
   /// 过去无条件移除该行并提示「已终止」：非 root 用户终止 root 进程时远端返回
   /// `kill: (1) - Operation not permitted`，那一行照样消失，而进程其实还活着。
-  Future<void> _killProcess(int pid) async {
+  /// Signals [pid], with `SIGTERM` unless [force].
+  ///
+  /// Two signals because they are two different requests. `kill -9` cannot be
+  /// caught: the process is destroyed where it stands, with no chance to flush a
+  /// transaction, finish a write or close a socket — which is why every shell
+  /// user reaches for it last. This page offered only that, so a database or a
+  /// web server stopped from a phone was always killed the hard way.
+  Future<void> _killProcess(int pid, {bool force = false}) async {
     final conn = _conn;
-    if (conn == null) return;
+    if (conn == null || _pendingKill != null) return;
+    setState(() => _pendingKill = pid);
     try {
-      final result = await conn.runCommand('kill -9 $pid');
+      final result = await conn.runCommand(
+        force ? 'kill -9 $pid' : 'kill $pid',
+      );
       final failure = remoteActionFailure(result);
       if (failure != null) {
         /// The row stays: the process is still there, and removing it would be
@@ -268,9 +287,14 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
         _allProcesses.removeWhere((p) => p['pid'] == pid);
         _applyFilter();
       });
+      // Reported as what it is. This was a red error snackbar for a successful
+      // kill — the one message in the app that said "failure" while nothing had
+      // failed, on a screen where red also means "the kill was refused".
       _showSnack(
-        t('killed_pid').replaceAll('{0}', pid.toString()),
-        isError: true,
+        (force ? t('killed_pid') : t('process_terminated')).replaceAll(
+          '{0}',
+          pid.toString(),
+        ),
       );
     } catch (e) {
       if (mounted) {
@@ -281,112 +305,83 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
         // 失败一样被翻译，而不是打印成编码。
         _showSnack('${t('error')}: ${sshCaughtErrorText(e)}', isError: true);
       }
+    } finally {
+      // Cleared here and not on the success path: a failure that left the row
+      // spinning forever would make that process permanently un-killable.
+      if (mounted) {
+        setState(() => _pendingKill = null);
+      } else {
+        _pendingKill = null;
+      }
     }
   }
 
   Future<void> _confirmKill(Map<String, dynamic> p) async {
     final pid = p['pid'] as int;
     final command = p['command'] as String;
-    final confirmed = await showAppConfirmDialog(
-      context,
-      title: t('kill_process'),
-      message: t(
-        'confirm_kill_process',
-      ).replaceAll('{0}', pid.toString()).replaceAll('{1}', command),
-      cancelLabel: t('cancel'),
-      confirmLabel: t('confirm'),
-      destructive: true,
-    );
-    if (!confirmed) return;
 
-    _killProcess(pid);
-  }
-
-  void _showDetail(Map<String, dynamic> p) {
-    final cs = Theme.of(context).colorScheme;
-    showModalBottomSheet(
+    // Offered as two decisions rather than one confirmed default: asking a
+    // process to stop and destroying it outright are different acts, and the
+    // second is the one that loses data.
+    final choice = await showModalBottomSheet<_KillSignal>(
       context: context,
-      backgroundColor: cs.surface,
-      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
       ),
       builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                p['command'] as String,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                Icons.logout,
+                color: Theme.of(ctx).colorScheme.primary,
+              ),
+              title: Text(t('signal_terminate')),
+              subtitle: Text(
+                t(
+                  'confirm_terminate_process',
+                ).replaceAll('{0}', '$pid').replaceAll('{1}', command),
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: AppFonts.mono,
-                ),
-                maxLines: 3,
               ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _chip('PID', '${p['pid']}', cs.primary),
-                  _chip('USER', p['user'] as String, cs.onSurfaceVariant),
-                  _chip(
-                    'CPU',
-                    '${(p['cpu'] as double).toStringAsFixed(1)}%',
-                    _usageColor(context, p['cpu'] as double),
-                  ),
-                  _chip(
-                    'MEM',
-                    '${(p['mem'] as double).toStringAsFixed(1)}%',
-                    _usageColor(context, p['mem'] as double),
-                  ),
-                ],
+              onTap: () => Navigator.pop(ctx, _KillSignal.terminate),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.dangerous_outlined,
+                color: Theme.of(ctx).colorScheme.error,
               ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _confirmKill(p);
-                  },
-                  icon: const Icon(Icons.close, size: 18, color: Colors.white),
-                  label: Text(
-                    t('kill_process_label'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: cs.error,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
+              title: Text(t('signal_force_kill')),
+              subtitle: Text(
+                t(
+                  'confirm_kill_process',
+                ).replaceAll('{0}', '$pid').replaceAll('{1}', command),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-          ),
+              onTap: () => Navigator.pop(ctx, _KillSignal.force),
+            ),
+          ],
         ),
       ),
     );
+    if (choice == null || !mounted) return;
+
+    await _killProcess(pid, force: choice == _KillSignal.force);
+    // A SIGTERM that was ignored leaves the row in place with no explanation,
+    // since the list only changes when the process actually goes.
+    if (choice == _KillSignal.terminate && mounted) {
+      _showSnack(t('kill_force_hint'));
+    }
   }
 
-  Widget _chip(String label, String val, Color c) =>
-      AppBadge(label: '$label: $val', color: c, maxWidth: 180);
-
-  Color _usageColor(BuildContext context, double v) {
-    final cs = Theme.of(context).colorScheme;
-    if (v >= 50) return cs.error;
-    if (v >= 10) return const Color(0xFFD29922);
-    return cs.primary;
-  }
+  void _showDetail(Map<String, dynamic> p) => showProcessDetailSheet(
+    context,
+    process: p,
+    onKill: () => _confirmKill(p),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -528,8 +523,15 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
                     children: [
                       Expanded(
                         child: Text(
+                          // "Top N by CPU", not "N processes": the listing is
+                          // capped by `head -51`, so a bare count claims the
+                          // phone is showing the whole table. It is not, and the
+                          // processes it leaves out are exactly the low-CPU ones
+                          // a search is most likely to be looking for.
                           t(
-                            'processes_count',
+                            _filtered.length == _allProcesses.length
+                                ? 'processes_count_top'
+                                : 'processes_count',
                           ).replaceAll('{0}', _filtered.length.toString()),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -559,10 +561,28 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
                             children: [
                               const SizedBox(height: 120),
                               Center(
-                                child: Text(
-                                  t('no_matching_processes'),
-                                  style: TextStyle(
-                                    color: cs.onSurface.withValues(alpha: 0.56),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 32,
+                                  ),
+                                  child: Text(
+                                    // Only the buffered listing was searched, so
+                                    // "no matching processes" was a claim about the
+                                    // server made from fifty rows of it. A process
+                                    // with low CPU is simply not in the buffer, and
+                                    // the message now says where the answer can be
+                                    // found instead of denying it exists.
+                                    textAlign: TextAlign.center,
+                                    t(
+                                      _searchQuery.trim().isEmpty
+                                          ? 'no_matching_processes'
+                                          : 'no_matching_processes_top',
+                                    ),
+                                    style: TextStyle(
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.56,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -619,11 +639,12 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
     final cs = Theme.of(context).colorScheme;
     final cpu = p['cpu'] as double;
     final mem = p['mem'] as double;
-    final cpuColor = _usageColor(context, cpu);
-    final memColor = _usageColor(context, mem);
+    final cpuColor = processUsageColor(context, cpu);
+    final memColor = processUsageColor(context, mem);
     final dividerColor = Theme.of(context).dividerColor;
+    final busy = _pendingKill == p['pid'];
     return AppCard(
-      onTap: () => _showDetail(p),
+      onTap: busy ? null : () => _showDetail(p),
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       borderColor: dividerColor.withValues(alpha: 0.6),
@@ -659,6 +680,17 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
                   style: TextStyle(color: cs.onSurface, fontSize: 13),
                 ),
               ),
+              if (busy) ...[
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.6,
+                    color: cs.secondary,
+                  ),
+                ),
+              ],
               const SizedBox(width: 4),
               Icon(
                 Icons.chevron_right,
@@ -727,4 +759,13 @@ class _TaskManagerPageState extends ConsumerState<TaskManagerPage> {
       ],
     );
   }
+}
+
+/// Which signal the user chose.
+enum _KillSignal {
+  /// `SIGTERM` — the process decides how to end.
+  terminate,
+
+  /// `SIGKILL` — the process ends now, whatever it was doing.
+  force,
 }

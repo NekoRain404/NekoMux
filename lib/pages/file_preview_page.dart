@@ -140,6 +140,13 @@ class _FilePreviewPageState extends State<FilePreviewPage> {
   }
 
   /// Invokes the onSave callback with the current editor content and returns to view mode.
+  /// Writes the buffer back, and only marks it saved when the write succeeded.
+  ///
+  /// `onSave` is expected to throw when the remote write fails — see
+  /// `sftp/sftp_file_open.dart`, whose callback rethrows after reporting. A
+  /// failure that returned normally here marked the text as saved anyway:
+  /// the unsaved-changes badge cleared, the back button stopped asking, and the
+  /// user left believing the server held their edit.
   Future<void> _save() async {
     if (widget.onSave == null || _isSaving) return;
     setState(() => _isSaving = true);
@@ -151,6 +158,11 @@ class _FilePreviewPageState extends State<FilePreviewPage> {
           _isEditing = false;
         });
       }
+    } catch (_) {
+      // Already reported by the callback, which owns the messenger. What is
+      // owed here is only the state: the buffer stays dirty and the page keeps
+      // warning about it.
+      return;
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
