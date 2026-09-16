@@ -1,13 +1,20 @@
 name: neko_mux
 description: "NekoMux - All-in-One Server Management Tool. SSH, SFTP, monitoring."
 publish_to: "none"
-version: 1.0.0+1
+version: 2.0.0+2002
 
 environment:
   sdk: ^3.12.0
 
 dependencies:
   flutter:
+    sdk: flutter
+  # Material's own strings — the About/license dialogs and the text-selection
+  # toolbar over every field — come from here. Without it they stay English in
+  # an app that ships eight languages; see lib/app.dart.
+  # Material 自带文案——关于/许可对话框、每个输入框上的文本选择工具条——来自这里。
+  # 没有它，一个发布八种语言的应用里这些文案全是英文；见 lib/app.dart。
+  flutter_localizations:
     sdk: flutter
   fl_chart: ^0.66.2
   sqflite: ^2.4.2+1
@@ -21,6 +28,13 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  # On-device verification of the real transfer path. Unit tests fake the
+  # session; these run the shipped code against a real SSH server on the phone
+  # itself — see integration_test/README.md.
+  # 对真实传输路径的真机验证。单元测试伪造会话；这些测试在手机上针对真实的 SSH
+  # 服务器运行随包发布的代码——见 integration_test/README.md。
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 

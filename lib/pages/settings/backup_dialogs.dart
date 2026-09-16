@@ -10,10 +10,12 @@
 // 只负责提问并返回答案，由持有数据库与 provider 的页面去执行。它们都不接触 service，
 // 因此「询问」与「写入」这一对备份中至关重要的区别在调用处一目了然。
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme/app_fonts.dart';
 
 import '../../core/i18n/strings.dart';
+import '../../services/backup_service.dart';
 
 /// Asks what an outgoing backup may carry, before any of it is built.
 /// 在生成备份内容之前，询问它允许携带什么。
@@ -182,6 +184,21 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
         decoration: InputDecoration(
           hintText: t('paste_json_hint'),
           hintStyle: TextStyle(color: cs.onSurface.withValues(alpha: 0.42)),
+          // The other half of export, which ends in `Clipboard.setData`. Without
+          // this button the only way to fill the field is the keyboard's own
+          // paste, which on a phone means a long-press on an empty box — the
+          // one gesture a field with no text in it gives no hint about.
+          suffixIcon: IconButton(
+            icon: Icon(Icons.content_paste, size: 18, color: cs.secondary),
+            tooltip: t('paste'),
+            onPressed: () async {
+              final data = await Clipboard.getData(Clipboard.kTextPlain);
+              final text = data?.text;
+              if (text == null || text.isEmpty) return;
+              _ctrl.text = text;
+              _ctrl.selection = TextSelection.collapsed(offset: text.length);
+            },
+          ),
           filled: true,
           fillColor: Theme.of(context).scaffoldBackgroundColor,
           enabledBorder: OutlineInputBorder(
@@ -216,4 +233,121 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
       ],
     );
   }
+}
+
+/// Asks whether to go ahead with a restore whose contents are already parsed.
+///
+/// Returns true only when the user confirmed. `null` (dismissed by tapping
+/// outside) is false, like every other confirmation in this app.
+///
+/// The counts are the whole point. "Data restored successfully" used to be the
+/// first and only thing said about a restore that had already happened: the
+/// dialog that collected the payload said nothing about what restoring it
+/// means, and the operation replaces any row whose id the payload also carries.
+/// Pasting last month's backup therefore discarded today's edits to those rows
+/// with no question asked — while "Clear Data", which destroys strictly less,
+/// has always confirmed. Naming per-section counts is what turns the question
+/// from a formality into one the user can actually answer: they can see that
+/// this payload holds 3 hosts when they have 12.
+Future<bool> showRestoreConfirmDialog(
+  BuildContext context, {
+  required Map<BackupSection, int> counts,
+  required bool carriesSecrets,
+}) async {
+  final cs = Theme.of(context).colorScheme;
+
+  // Built from the section labels the rest of the app already translates, so a
+  // new section cannot arrive untranslated — the same reason `readBackupRows`
+  // takes the section rather than the table name.
+  String labelOf(BackupSection section) => switch (section) {
+    BackupSection.hosts => t('my_hosts'),
+    BackupSection.credentials => t('credentials'),
+    BackupSection.snippets => t('snippets'),
+    BackupSection.settings => t('settings'),
+  };
+
+  final summary = counts.entries
+      .where((e) => e.value > 0)
+      .map((e) => '${labelOf(e.key)} ${e.value}')
+      .join(' · ');
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: cs.surfaceContainerHighest,
+      title: Text(
+        t('restore_confirm_title'),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: cs.onSurface),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t('restore_confirm_body'),
+            style: TextStyle(
+              color: cs.onSurface.withValues(alpha: 0.72),
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          if (summary.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Theme.of(ctx).scaffoldBackgroundColor,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Theme.of(ctx).dividerColor),
+              ),
+              child: Text(
+                summary,
+                style: TextStyle(
+                  color: cs.onSurface,
+                  fontSize: 12,
+                  fontFamily: AppFonts.mono,
+                ),
+              ),
+            ),
+          ],
+          if (carriesSecrets) ...[
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.key_outlined, size: 16, color: cs.error),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    t('restore_confirm_secrets'),
+                    style: TextStyle(color: cs.error, fontSize: 12, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: Text(
+            t('cancel'),
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.62)),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(
+            t('restore'),
+            style: TextStyle(color: cs.primary, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
 }

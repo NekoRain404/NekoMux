@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neko_mux/core/i18n/strings.dart';
 import 'package:neko_mux/pages/settings/backup_dialogs.dart';
+import 'package:neko_mux/services/backup_service.dart';
 
 /// Pumps a button that opens the export dialog, and returns the future the page
 /// would be awaiting.
@@ -48,6 +49,38 @@ Future<Future<bool?>> _openExportDialog(WidgetTester tester) async {
 /// The checkbox the user has to tick for an export to carry credentials.
 /// 用户必须勾选才能让导出携带凭据的复选框。
 Finder _secretsCheckbox() => find.byType(Checkbox);
+
+/// Opens the restore confirmation and returns the future the page awaits.
+Future<Future<bool>> openRestoreConfirm(
+  WidgetTester tester, {
+  required Map<BackupSection, int> counts,
+  required bool carriesSecrets,
+}) async {
+  Future<bool>? pending;
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => Center(
+            child: ElevatedButton(
+              onPressed: () => pending = showRestoreConfirmDialog(
+                context,
+                counts: counts,
+                carriesSecrets: carriesSecrets,
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  await tester.tap(find.text('open'));
+  await tester.pumpAndSettle();
+  expect(pending, isNotNull, reason: 'the dialog was never opened');
+  return pending!;
+}
 
 void main() {
   setUp(() => AppStrings.setLang('en'));
@@ -190,4 +223,83 @@ void main() {
 
     expect(await pending, isNull);
   });
+
+  group('restore confirmation', () {
+  /// Tests for the confirmation that stands between a parsed backup and the
+  /// transaction that writes it.
+  ///
+  /// Before it existed, "Data restored successfully" was the first thing the user
+  /// heard about a restore — after the rows had already been replaced. These tests
+  /// pin the two things that make the question answerable: it names what is about
+  /// to be replaced, and it warns when real secrets are part of it.
+
+    testWidgets('names the sections the payload actually carries', (tester) async {
+      await openRestoreConfirm(
+        tester,
+        counts: {
+          BackupSection.hosts: 3,
+          BackupSection.credentials: 2,
+          BackupSection.snippets: 0,
+          BackupSection.settings: 7,
+        },
+        carriesSecrets: false,
+      );
+
+      // The counts are what let a user notice that a payload holds 3 hosts when
+      // they have 12 — the mistake this confirmation exists to catch.
+      expect(find.textContaining('3'), findsWidgets);
+      expect(find.textContaining('2'), findsWidgets);
+      expect(
+        find.textContaining('0'),
+        findsNothing,
+        reason: 'an absent section must not be listed as carrying nothing',
+      );
+    });
+
+    testWidgets('warns when the payload carries real secrets', (tester) async {
+      await openRestoreConfirm(
+        tester,
+        counts: {BackupSection.hosts: 1},
+        carriesSecrets: true,
+      );
+      expect(
+        find.text(AppStrings.get('restore_confirm_secrets')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('says nothing about secrets when the payload has none', (
+      tester,
+    ) async {
+      // A warning shown on every restore is one the user learns to ignore, which
+      // costs exactly the restore where it mattered.
+      await openRestoreConfirm(
+        tester,
+        counts: {BackupSection.hosts: 1},
+        carriesSecrets: false,
+      );
+      expect(find.text(AppStrings.get('restore_confirm_secrets')), findsNothing);
+    });
+
+    testWidgets('confirming reports true and cancelling reports false', (
+      tester,
+    ) async {
+      final confirmed = await openRestoreConfirm(
+        tester,
+        counts: {BackupSection.hosts: 1},
+        carriesSecrets: false,
+      );
+      await tester.tap(find.text(AppStrings.get('restore')));
+      await tester.pumpAndSettle();
+      expect(await confirmed, isTrue);
+
+      final cancelled = await openRestoreConfirm(
+        tester,
+        counts: {BackupSection.hosts: 1},
+        carriesSecrets: false,
+      );
+      await tester.tap(find.text(AppStrings.get('cancel')));
+      await tester.pumpAndSettle();
+      expect(await cancelled, isFalse);
+    });  });
 }

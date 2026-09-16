@@ -78,89 +78,134 @@ class SettingsTileShell extends StatelessWidget {
 
 /// A setting whose value is a number on a slider, with the value shown.
 /// 数值由滑块调节、并把当前值显示出来的设置项。
-class SettingsSliderTile extends StatelessWidget {
+///
+/// Stateful, and the reason is the thumb. Painting it straight from [value]
+/// means it is drawn from whatever the last committed write produced, so during
+/// a drag it trails the finger and, at the end, settles a step behind where the
+/// finger stopped. [value] is therefore only the resting position: a drag moves
+/// [_dragValue], which the thumb and the readout follow, and the write happens
+/// once, when the finger lifts.
+///
+/// The write that used to happen per tick was not free: every step of a drag ran
+/// the full `tb_settings` write of all seven rows, with its future discarded, so
+/// a one-second drag queued a dozen of them and any failure among them was
+/// silent.
+class SettingsSliderTile extends StatefulWidget {
   final IconData icon;
   final String title;
   final String sub;
-  final String display;
+
+  /// The committed value — where the thumb rests when nothing is being dragged.
   final double value;
   final double min;
   final double max;
   final int div;
-  final ValueChanged<double> onChanged;
+
+  /// Renders a value for the row's readout, unit and all. A function rather
+  /// than a finished string so the number tracks the drag: the caller owns the
+  /// unit (`px`, `sec`), this widget owns which value is current.
+  final String Function(double value) format;
+
+  /// Called once with the final value, when the drag ends.
+  final ValueChanged<double> onChangeEnd;
 
   const SettingsSliderTile({
     super.key,
     required this.icon,
     required this.title,
     required this.sub,
-    required this.display,
     required this.value,
     required this.min,
     required this.max,
     required this.div,
-    required this.onChanged,
+    required this.format,
+    required this.onChangeEnd,
   });
+
+  @override
+  State<SettingsSliderTile> createState() => _SettingsSliderTileState();
+}
+
+class _SettingsSliderTileState extends State<SettingsSliderTile> {
+  /// Set while a drag is in progress, null otherwise. Null rather than a copy of
+  /// [SettingsSliderTile.value] so an external change to the setting — another
+  /// screen, a restored backup — is visible immediately instead of waiting for
+  /// this widget to be rebuilt from scratch.
+  double? _dragValue;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final shown = _dragValue ?? widget.value;
+
     return SettingsTileShell(
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: cs.primary, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: cs.onSurface, fontSize: 14),
-                ),
-                if (_hasDistinctSub(title, sub))
-                  Text(
-                    sub,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: cs.onSurface.withValues(alpha: 0.48),
-                      fontSize: 10,
+          Row(
+            children: [
+              Icon(widget.icon, color: cs.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: cs.onSurface, fontSize: 14),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          Text(
-            display,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: cs.primary,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: MediaQuery.sizeOf(context).width < 380 ? 92 : 120,
-            child: SliderTheme(
-              data: SliderThemeData(
-                trackHeight: 3,
-                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                activeTrackColor: cs.secondary,
-                inactiveTrackColor: cs.onSurface.withValues(alpha: 0.1),
-                thumbColor: cs.secondary,
+                    if (_hasDistinctSub(widget.title, widget.sub))
+                      Text(
+                        widget.sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: cs.onSurface.withValues(alpha: 0.48),
+                          fontSize: 10,
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              child: Slider(
-                value: value,
-                min: min,
-                max: max,
-                divisions: div,
-                onChanged: onChanged,
+              const SizedBox(width: 8),
+              Text(
+                widget.format(shown),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: cs.primary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
+            ],
+          ),
+          // The track gets the row to itself. Inline beside the label it was
+          // 92-120 px wide, which for the 27 steps of the 3-30 s timeout is
+          // under 4 px per step — narrower than the thumb — so landing on 10 s
+          // rather than 9 or 11 was luck. Full width makes each step roughly
+          // four times wider.
+          SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              activeTrackColor: cs.secondary,
+              inactiveTrackColor: cs.onSurface.withValues(alpha: 0.1),
+              thumbColor: cs.secondary,
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: Slider(
+              value: shown.clamp(widget.min, widget.max),
+              min: widget.min,
+              max: widget.max,
+              divisions: widget.div,
+              onChanged: (v) => setState(() => _dragValue = v),
+              onChangeEnd: (v) {
+                setState(() => _dragValue = null);
+                if (v != widget.value) widget.onChangeEnd(v);
+              },
             ),
           ),
         ],

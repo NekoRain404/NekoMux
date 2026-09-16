@@ -101,8 +101,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               min: 10,
               max: 20,
               div: 10,
-              display: '${s.terminalFontSize} px',
-              onChanged: (v) =>
+              format: (v) => '${v.round()} px',
+              onChangeEnd: (v) =>
                   _update(s.copyWith(terminalFontSize: v.round())),
             ),
             const SizedBox(height: 8),
@@ -128,8 +128,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               min: 3,
               max: 30,
               div: 27,
-              display: '${s.connectTimeout} ${t('sec')}',
-              onChanged: (v) => _update(s.copyWith(connectTimeout: v.round())),
+              format: (v) => '${v.round()} ${t('sec')}',
+              onChangeEnd: (v) =>
+                  _update(s.copyWith(connectTimeout: v.round())),
             ),
             SettingsInputTile(
               icon: Icons.settings_ethernet,
@@ -378,6 +379,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       // 唯一可以合法缺席的分节——设置被导出之前写出的载荷没有它，且必须仍能恢复——这
       // 正是读取时必须指明分节、而不能假定每一节都必需的原因。
       final settings = readBackupRows(payload, BackupSection.settings);
+
+      // Asked BEFORE the transaction, with the parsed contents in hand: this is
+      // the last moment at which the user can still say no, and the counts are
+      // the only way the question can be answered rather than waved through.
+      final confirmed = await showRestoreConfirmDialog(
+        context,
+        counts: {
+          BackupSection.hosts: hosts.length,
+          BackupSection.credentials: credentials.length,
+          BackupSection.snippets: snippets.length,
+          BackupSection.settings: settings.length,
+        },
+        // A payload exported without secrets carries the placeholder instead, so
+        // this is exactly the question "will real credentials be written".
+        carriesSecrets: credentials.any(
+          (row) => backupSecretToStore(row) != null,
+        ),
+      );
+      if (!confirmed || !mounted) return;
 
       final db = await ref.read(databaseProvider.future);
       // Secrets asked for by this payload, gathered here and written only after

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/app_info.dart';
+import 'core/i18n/strings.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/theme_provider.dart';
 import 'pages/add_host_page.dart';
@@ -9,11 +11,20 @@ import 'pages/home_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/snippet_list_page.dart';
 
-class NekoMuxApp extends ConsumerWidget {
+class NekoMuxApp extends ConsumerStatefulWidget {
   const NekoMuxApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NekoMuxApp> createState() => _NekoMuxAppState();
+}
+
+class _NekoMuxAppState extends ConsumerState<NekoMuxApp> {
+  /// Held across the rebuild that a language change triggers, so the code below
+  /// can reach the new Navigator — see [_restoreSettingsRoute].
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  Widget build(BuildContext context) {
     final themeId = ref.watch(themeIdProvider);
     final isDark = ref.watch(isDarkProvider);
 
@@ -28,6 +39,12 @@ class NekoMuxApp extends ConsumerWidget {
     // 原本没有任何地方读这个 provider——只有设置页会读。于是在设置里选好的语言
     // 只在本次运行内生效，下次启动就静默丢失，直到用户碰巧再打开一次设置页。
     final language = ref.watch(languageProvider);
+
+    // Re-entering Settings after a language change. `ref.listen` rather than a
+    // comparison against a stored previous value: the callback runs once per
+    // change, so the rebuild this widget is in the middle of cannot re-trigger
+    // it.
+    ref.listen<String>(languageProvider, (_, _) => _restoreSettingsRoute());
 
     final theme = AppThemeDef.presets.firstWhere(
       (t) => t.id == themeId,
@@ -56,6 +73,19 @@ class NekoMuxApp extends ConsumerWidget {
       title: appName,
       debugShowCheckedModeBanner: false,
       theme: theme.buildTheme(isDark: isDark),
+      // Material's own strings — the About dialog's "View licenses", the license
+      // page, and the text-selection toolbar over every text field — come from
+      // these delegates. Without them the app shipped eight languages and every
+      // built-in Material string stayed English.
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: [
+        for (final code in AppStrings.supportedLanguages.keys) Locale(code),
+      ],
+      navigatorKey: _navigatorKey,
       home: const HomePage(),
       routes: {
         '/add-host': (_) => const AddHostPage(),
@@ -64,5 +94,27 @@ class NekoMuxApp extends ConsumerWidget {
         '/snippets': (_) => const SnippetListPage(),
       },
     );
+  }
+
+  /// Puts the user back where they were — Settings — after a language change.
+  ///
+  /// The `ValueKey` above rebuilds the whole app so already-built screens
+  /// re-read the new translations, and that necessarily recreates the
+  /// Navigator: the route stack goes with it. That is a fair trade for the
+  /// rebuild, but not for the navigation — the only place the language can be
+  /// changed is Settings, so the user's stack at that moment is always
+  /// "… → Settings", and dropping it to the host list is a cost this feature
+  /// never needed to charge.
+  ///
+  /// Post-frame, because the Navigator this pushes onto is the one the rebuild
+  /// above is about to create; the previous one is already gone.
+  void _restoreSettingsRoute() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null) return;
+      navigator.push(
+        MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
+      );
+    });
   }
 }
