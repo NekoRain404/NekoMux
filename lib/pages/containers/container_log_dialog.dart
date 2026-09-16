@@ -22,9 +22,32 @@ import '../../core/i18n/strings.dart';
 /// Fetches the log text to display; owned by the page, which holds the
 /// connection.
 /// 取回要展示的日志文本；由持有连接的页面提供。
-typedef ContainerLogLoader = Future<String> Function();
+typedef LogTextLoader = Future<String> Function();
 
-/// Shows a loading dialog, loads the logs, then replaces it with the log view.
+/// The container viewer's old name for [LogTextLoader].
+typedef ContainerLogLoader = LogTextLoader;
+
+/// Shows a container's logs. Thin wrapper over [showLogViewer], kept so the
+/// container page reads the same as it did.
+Future<void> showContainerLogsDialog(
+  BuildContext context, {
+  required String containerName,
+  required ContainerLogLoader loadLogs,
+  required VoidCallback onCopied,
+}) => showLogViewer(
+  context,
+  sourceName: containerName,
+  loadLogs: loadLogs,
+  onCopied: onCopied,
+);
+
+/// Shows a loading dialog, loads the text, then replaces it with a log view.
+///
+/// Used for `docker logs` and for `journalctl` alike: what differs between them
+/// is the command the caller runs and the name shown in the title, and both of
+/// those are arguments. The behaviour that must not differ — the loading route
+/// being the one taken down, the text being selectable and copyable — is
+/// therefore written once.
 /// 显示加载对话框、载入日志，然后用日志视图替换它。
 ///
 /// [loadLogs] is expected to report its own failures as text (the page turns a
@@ -34,10 +57,10 @@ typedef ContainerLogLoader = Future<String> Function();
 /// [loadLogs] 应自行把失败转成文本（页面会把连接缺失与 `docker logs` 失败变成
 /// 可读的一行），因此查看器无需渲染异常；下面的 `try` 只是防止它万一抛出时把
 /// spinner 永远留在屏幕上。
-Future<void> showContainerLogsDialog(
+Future<void> showLogViewer(
   BuildContext context, {
-  required String containerName,
-  required ContainerLogLoader loadLogs,
+  required String sourceName,
+  required LogTextLoader loadLogs,
   required VoidCallback onCopied,
 }) async {
   final cs = Theme.of(context).colorScheme;
@@ -56,7 +79,7 @@ Future<void> showContainerLogsDialog(
     builder: (ctx) => AlertDialog(
       backgroundColor: cs.surface,
       title: Text(
-        '$containerName - ${t('logs')}',
+        '$sourceName - ${t('logs')}',
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: AppFonts.monoText(color: cs.onSurface, fontSize: 15),
@@ -104,7 +127,7 @@ Future<void> showContainerLogsDialog(
         children: [
           Expanded(
             child: Text(
-              '$containerName - ${t('logs')}',
+              '$sourceName - ${t('logs')}',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: AppFonts.monoText(color: cs.onSurface, fontSize: 15),

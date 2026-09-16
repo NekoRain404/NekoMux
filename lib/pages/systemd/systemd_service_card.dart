@@ -19,11 +19,25 @@ class SystemdServiceCard extends StatelessWidget {
   /// 要渲染的 `systemctl` 解析行。
   final Map<String, dynamic> svc;
 
-  /// Called when the card is tapped (opens the action sheet).
-  /// 卡片被点击时调用（打开操作面板）。
+  /// Called when the card is tapped (opens the action sheet). Ignored while
+  /// [busy], since the sheet's actions are the ones already running.
   final VoidCallback onTap;
 
-  const SystemdServiceCard({super.key, required this.svc, required this.onTap});
+  /// True while a `systemctl` command for THIS unit is in flight.
+  ///
+  /// The state tags keep showing the last answer `list-units` gave, which for a
+  /// restart is the state before the command — so without this the card looks
+  /// untouched for the seconds the command takes, and tapping again issues a
+  /// second one. The spinner says "in progress" without claiming a state nobody
+  /// has reported yet.
+  final bool busy;
+
+  const SystemdServiceCard({
+    super.key,
+    required this.svc,
+    required this.onTap,
+    this.busy = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +45,7 @@ class SystemdServiceCard extends StatelessWidget {
     final active = svc['active'] as String;
     final ac = systemdStateColor(context, active);
     return AppCard(
-      onTap: onTap,
+      onTap: busy ? null : onTap,
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       padding: const EdgeInsets.all(12),
       borderColor: ac.withValues(alpha: 0.7),
@@ -83,11 +97,21 @@ class SystemdServiceCard extends StatelessWidget {
               ],
             ),
           ),
-          Icon(
-            Icons.chevron_right,
-            color: cs.onSurface.withValues(alpha: 0.3),
-            size: 18,
-          ),
+          if (busy)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.8,
+                color: cs.secondary,
+              ),
+            )
+          else
+            Icon(
+              Icons.chevron_right,
+              color: cs.onSurface.withValues(alpha: 0.3),
+              size: 18,
+            ),
         ],
       ),
     );

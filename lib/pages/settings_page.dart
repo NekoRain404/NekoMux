@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite/sqflite.dart';
@@ -348,17 +349,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       );
 
       final json = const JsonEncoder.withIndent('  ').convert(payload);
+
+      // Two destinations, chosen by what the payload carries. The clipboard is
+      // where a secret-free export belongs: it is how the JSON reaches the
+      // restore field on another phone, and there is nothing in it to leak. An
+      // export that carries real passwords and keys is written to a file the
+      // user picks instead, because the system clipboard is readable by every
+      // other app on the device and by anything that syncs it — which is what
+      // this project's own rule forbids (see CLAUDE.md, Secrets).
+      if (includeSecrets) {
+        await _exportToFile(json);
+        return;
+      }
+
       await Clipboard.setData(ClipboardData(text: json));
       if (mounted) {
-        // Say which of the two exports this was, so a user who walks away from
-        // the snackbar still knows whether the clipboard can get them back in.
-        // 说明这次是两种导出中的哪一种，即使用户没看到提示，也知道剪贴板里的内容
-        // 能否让自己直接登录回去。
-        _showSnack(
-          includeSecrets
-              ? '${t('export_success')} · ${t('export_secrets_warning')}'
-              : '${t('export_success')} · ${t('export_secrets_omitted')}',
-        );
+        _showSnack('${t('export_success')} · ${t('export_secrets_omitted')}');
       }
     } catch (e) {
       if (mounted) {
@@ -370,6 +376,38 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         );
       }
     }
+  }
+
+  /// Writes the export to a file the user chooses.
+  ///
+  /// `FilePicker.saveFile` is the one mechanism Android offers for "the user
+  /// picks where this goes"; this app declares only `INTERNET`, so it cannot
+  /// write into shared storage itself (the same reason downloads stage first
+  /// and are published from the finished row).
+  Future<void> _exportToFile(String json) async {
+    final Uint8List bytes = Uint8List.fromList(utf8.encode(json));
+    final Uri? saved;
+    try {
+      saved = await FilePicker.saveFile(
+        fileName: 'nekomux-backup.json',
+        bytes: bytes,
+        dialogTitle: t('export_backup'),
+      );
+    } catch (e) {
+      if (mounted) {
+        _showSnack(
+          t('service_action_failed')
+              .replaceAll('{0}', t('export_backup'))
+              .replaceAll('{1}', '$e'),
+          isError: true,
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    // Null is the documented "the user cancelled" and the only other answer.
+    if (saved == null) return;
+    _showSnack('${t('export_success')} · ${t('export_secrets_warning')}');
   }
 
   /// Show dialog to paste JSON and restore data.

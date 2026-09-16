@@ -9,6 +9,7 @@ import '../services/host_key_trust.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
+import 'containers/container_log_dialog.dart';
 import '../widgets/host_key_prompt.dart';
 import 'console/ssh_error_text.dart';
 import 'containers/remote_action_outcome.dart';
@@ -27,6 +28,23 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
   List<Map<String, dynamic>> _services = [];
   List<Map<String, dynamic>> _filtered = [];
   bool _loading = true;
+
+  /// True while a pull-to-refresh is running.
+  ///
+  /// Separate from [_loading], which replaces the whole body with a spinner:
+  /// `RefreshIndicator` is inside that body, so setting `_loading` from the pull
+  /// removed the indicator mid-gesture, blanked the search field and the filter
+  /// chips, and — on a host with hundreds of units — threw away the list the
+  /// user was looking at while they watched.
+  bool _isRefreshing = false;
+
+  /// Unit whose `systemctl` command is running, or null.
+  ///
+  /// The sheet closes on tap, so without this the card stayed tappable for as
+  /// long as the command took and a second visit issued a second
+  /// `systemctl restart` — against a list that had not changed yet, which is
+  /// precisely what invites the second tap.
+  String? _pendingUnit;
   String? _error;
   SshConnection? _conn;
   String _filter = 'All';
@@ -56,9 +74,28 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  /// Reloads without blanking the screen — what a pull-to-refresh asks for.
+  Future<void> _refresh() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+    try {
+      await _load(showSpinner: false);
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      } else {
+        _isRefreshing = false;
+      }
+    }
+  }
+
+  /// Reads the unit list.
+  ///
+  /// [showSpinner] is false for a refresh, which already has the pull indicator
+  /// to say it is working — and whose list must survive the reload.
+  Future<void> _load({bool showSpinner = true}) async {
+    if (showSpinner) _loading = true;
     setState(() {
-      _loading = true;
       _error = null;
     });
     final host = widget.host;
@@ -240,7 +277,8 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
   /// required.`
   Future<void> _action(String unit, String action) async {
     final conn = _conn;
-    if (conn == null) return;
+    if (conn == null || _pendingUnit != null) return;
+    setState(() => _pendingUnit = unit);
     final cs = Theme.of(context).colorScheme;
     final actionLabel = _actionLabel(action);
     try {
@@ -272,6 +310,14 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
       if (mounted) {
         _snack(_failureMessage(actionLabel, sshCaughtErrorText(e)), cs.error);
       }
+    } finally {
+      // Cleared here rather than on the success path: a failure that left the
+      // card spinning would make that unit permanently un-actionable.
+      if (mounted) {
+        setState(() => _pendingUnit = null);
+      } else {
+        _pendingUnit = null;
+      }
     }
   }
 
@@ -279,14 +325,79 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
   /// 打开 [svc] 的操作面板；它上报的每个操作都先经确认。
   void _openSheet(Map<String, dynamic> svc) {
     final unit = svc['unit'] as String;
+    // Asked before the sheet draws, so the persistence entries reflect the unit
+    // rather than offering both and leaving the user to guess.
+    final bootState = _probeBootState(unit);
     showSystemdActionSheet(
       context,
       svc: svc,
+      enabled: bootState,
       onAction: (action) => _confirmAction(unit, action),
     );
   }
 
+  /// Whether [unit] is set to start at boot, or null when the server would not
+  /// say.
+  ///
+  /// `systemctl list-units` — the listing this page is built on — carries no
+  /// enabled-at-boot information at all, so it has to be asked for separately,
+  /// per unit, when the user opens the sheet. Null on any failure: an unknown
+  /// state is shown as both options rather than as a guess.
+  Future<bool?> _probeBootState(String unit) async {
+    final conn = _conn;
+    if (conn == null) return null;
+    try {
+      final result = await conn.runCommand('systemctl is-enabled $unit');
+      final answer = result.stdout.trim().toLowerCase();
+      // The command answers "enabled"/"disabled" and also "static", "masked",
+      // "indirect" and "alias" — states that are neither, and where enabling is
+      // meaningless. Those return null, which the sheet renders as both entries.
+      if (answer == 'enabled') return true;
+      if (answer == 'disabled') return false;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Shows a unit's recent journal, the same way a container's logs are shown.
+  ///
+  /// `journalctl` had no entry point anywhere in the app: when a unit refused to
+  /// start, the reason was on the server and visible only from a terminal.
+  Future<void> _showUnitLogs(String unit) async {
+    final conn = _conn;
+    if (conn == null) {
+      _snack(t('ssh_not_connected'), Theme.of(context).colorScheme.error);
+      return;
+    }
+    await showLogViewer(
+      context,
+      sourceName: unit,
+      loadLogs: () async {
+        try {
+          final result = await conn.runCommand(
+            'journalctl -u $unit -n 200 --no-pager',
+          );
+          final text = result.stdout.trim();
+          // An empty journal is a fact about the unit, not an error, and it is
+          // worth saying: the alternative is a blank box that looks like a
+          // failed load.
+          return text.isEmpty ? t('no_data') : text;
+        } catch (e) {
+          return '${t('error')}: ${sshCaughtErrorText(e)}';
+        }
+      },
+      onCopied: () => _snack(t('copied'), Theme.of(context).colorScheme.primary),
+    );
+  }
+
   Future<void> _confirmAction(String unit, String action) async {
+    // Reading the journal is not a change to the unit, so it is neither
+    // confirmed nor reported as an action: it opens the log viewer directly.
+    if (action == 'logs') {
+      await _showUnitLogs(unit);
+      return;
+    }
     final actionLabel = _actionLabel(action);
     final confirmed = await showAppConfirmDialog(
       context,
@@ -427,7 +538,9 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
                 // Service list
                 Expanded(
                   child: RefreshIndicator(
-                    onRefresh: _load,
+                    // Only the refresh flag, so the list and the chrome stay
+                    // where they are while the reload runs.
+                    onRefresh: _refresh,
                     color: cs.primary,
                     child: _filtered.isEmpty
                         ? ListView(
@@ -450,6 +563,7 @@ class _SystemdPageState extends ConsumerState<SystemdPage> {
                               final svc = _filtered[i];
                               return SystemdServiceCard(
                                 svc: svc,
+                                busy: _pendingUnit == svc['unit'],
                                 onTap: () => _openSheet(svc),
                               );
                             },

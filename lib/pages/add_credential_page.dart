@@ -166,9 +166,21 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
     });
   }
 
+  /// True while a save is in flight, which also disables the button.
+  ///
+  /// Two quick taps used to write two credentials: the id is generated inside
+  /// this method, so the second tap produced a different one and the "replace"
+  /// on insert never collided. Writing to secure storage is slow enough for that
+  /// window to be reached by an ordinary double tap, and the result is two rows
+  /// with the same name and the same secret — one of which the user will later
+  /// delete, wondering which is which.
+  bool _isSaving = false;
+
   Future<void> _save() async {
+    if (_isSaving) return;
     hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.light);
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
     final cs = Theme.of(context).colorScheme;
 
     // Reuse the stored secret only when no new material was typed and the auth
@@ -199,6 +211,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${t('load_failed_msg')}: $e'),
@@ -209,6 +222,9 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
       }
       return;
     }
+    // Left set on the way out rather than cleared: this path pops the page, and
+    // clearing it first would leave the button live for the frames between the
+    // write finishing and the route going away.
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -463,7 +479,7 @@ class _AddCredentialPageState extends ConsumerState<AddCredentialPage> {
                 width: double.infinity,
                 height: 46,
                 child: FilledButton.icon(
-                  onPressed: _save,
+                  onPressed: _isSaving ? null : _save,
                   icon: const Icon(Icons.save_outlined, size: 18),
                   label: Text(
                     _isEditing ? t('update_credential') : t('save_credential'),

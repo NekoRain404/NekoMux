@@ -9,6 +9,9 @@
 // 采用与 `pages/sftp/sftp_dialogs.dart` 相同的风格，写成自由函数而非方法：每个函数
 // 只负责提问并返回答案，由持有数据库与 provider 的页面去执行。它们都不接触 service，
 // 因此「询问」与「写入」这一对备份中至关重要的区别在调用处一目了然。
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -155,6 +158,51 @@ class _RestoreBackupDialog extends StatefulWidget {
 class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
   final _ctrl = TextEditingController();
 
+  void _fill(String text) {
+    _ctrl.text = text;
+    _ctrl.selection = TextSelection.collapsed(offset: text.length);
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    _fill(text);
+  }
+
+  /// Loads a backup file into the field.
+  ///
+  /// The text lands in the same editable box rather than being parsed straight
+  /// away, so the user sees exactly what is about to be restored — and the
+  /// confirmation that follows counts what is in the box, not what was on disk.
+  Future<void> _pickFile() async {
+    try {
+      final picked = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+      );
+      final file = picked.firstOrNull;
+      if (file == null) return;
+      // Read through the file itself rather than `withData`: a backup carrying
+      // every host and credential is not small, and asking the picker to hold it
+      // in memory only to hand it straight back is a second copy of it.
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      // `allowMalformed` for the same reason the SFTP preview uses it: a file
+      // that picked up a stray byte should still open far enough to be read,
+      // and the parse that follows is what rejects a payload that is not JSON.
+      _fill(utf8.decode(bytes, allowMalformed: true));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(t('load_failed_msg').replaceAll('{0}', '$e')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _ctrl.dispose();
@@ -188,16 +236,24 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
           // this button the only way to fill the field is the keyboard's own
           // paste, which on a phone means a long-press on an empty box — the
           // one gesture a field with no text in it gives no hint about.
-          suffixIcon: IconButton(
-            icon: Icon(Icons.content_paste, size: 18, color: cs.secondary),
-            tooltip: t('paste'),
-            onPressed: () async {
-              final data = await Clipboard.getData(Clipboard.kTextPlain);
-              final text = data?.text;
-              if (text == null || text.isEmpty) return;
-              _ctrl.text = text;
-              _ctrl.selection = TextSelection.collapsed(offset: text.length);
-            },
+          suffixIcon: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Opening a file is the other half of an export that carried
+              // secrets: those are written to a file rather than the clipboard
+              // (see CLAUDE.md, Secrets), so without this button such a backup
+              // could be produced and never restored.
+              IconButton(
+                icon: Icon(Icons.folder_open, size: 18, color: cs.secondary),
+                tooltip: t('restore_from_file'),
+                onPressed: _pickFile,
+              ),
+              IconButton(
+                icon: Icon(Icons.content_paste, size: 18, color: cs.secondary),
+                tooltip: t('paste'),
+                onPressed: _pasteFromClipboard,
+              ),
+            ],
           ),
           filled: true,
           fillColor: Theme.of(context).scaffoldBackgroundColor,

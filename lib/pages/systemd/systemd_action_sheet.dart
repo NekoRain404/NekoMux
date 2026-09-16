@@ -21,10 +21,20 @@ import 'systemd_visuals.dart';
 /// confirmation dialog opened from it cannot end up underneath the sheet.
 /// [onAction] 收到被点击条目的裸操作名（`start`、`stop` 等）；它在面板自行关闭之后才
 /// 被调用，因此由它打开的确认对话框不会压在面板下面。
+/// [enabled] answers whether the unit starts at boot, from a `systemctl
+/// is-enabled` probe the page runs when the sheet opens. Before this, the sheet
+/// always offered both Enable and Disable with no indication which one was a
+/// no-op, and the user had no way to see whether a persistence change had
+/// already been made — the only feedback was a generic "succeeded" toast for
+/// whichever they picked.
+///
+/// Null means the probe could not answer, in which case both entries are shown
+/// as before: an honest fallback rather than a guess.
 void showSystemdActionSheet(
   BuildContext context, {
   required Map<String, dynamic> svc,
   required ValueChanged<String> onAction,
+  Future<bool?>? enabled,
 }) {
   final cs = Theme.of(context).colorScheme;
   final unit = svc['unit'] as String;
@@ -125,22 +135,97 @@ void showSystemdActionSheet(
                     onAction('reload');
                   },
                 ),
+                // The persistence pair, drawn from what the probe found.
+                if (enabled != null)
+                  FutureBuilder<bool?>(
+                    future: enabled,
+                    builder: (ctx2, snap) {
+                      if (snap.connectionState != ConnectionState.done) {
+                        return _ServiceActionButton(
+                          Icons.hourglass_empty,
+                          t('systemd_boot_state'),
+                          cs.onSurface.withValues(alpha: 0.4),
+                          null,
+                        );
+                      }
+                      final isEnabled = snap.data;
+                      if (isEnabled == true) {
+                        return _ServiceActionButton(
+                          Icons.block,
+                          t('systemd_disable'),
+                          cs.onSurface.withValues(alpha: 0.56),
+                          () {
+                            Navigator.pop(ctx);
+                            onAction('disable');
+                          },
+                        );
+                      }
+                      if (isEnabled == false) {
+                        return _ServiceActionButton(
+                          Icons.check_circle_outline,
+                          t('systemd_enable'),
+                          cs.primary,
+                          () {
+                            Navigator.pop(ctx);
+                            onAction('enable');
+                          },
+                        );
+                      }
+                      // The probe failed, so both are offered — the former
+                      // behaviour, which is wrong only in that it makes the
+                      // user guess.
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _ServiceActionButton(
+                            Icons.check_circle_outline,
+                            t('systemd_enable'),
+                            cs.primary,
+                            () {
+                              Navigator.pop(ctx);
+                              onAction('enable');
+                            },
+                          ),
+                          _ServiceActionButton(
+                            Icons.block,
+                            t('systemd_disable'),
+                            cs.onSurface.withValues(alpha: 0.56),
+                            () {
+                              Navigator.pop(ctx);
+                              onAction('disable');
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  )
+                else ...[
+                  _ServiceActionButton(
+                    Icons.check_circle_outline,
+                    t('systemd_enable'),
+                    cs.primary,
+                    () {
+                      Navigator.pop(ctx);
+                      onAction('enable');
+                    },
+                  ),
+                  _ServiceActionButton(
+                    Icons.block,
+                    t('systemd_disable'),
+                    cs.onSurface.withValues(alpha: 0.56),
+                    () {
+                      Navigator.pop(ctx);
+                      onAction('disable');
+                    },
+                  ),
+                ],
                 _ServiceActionButton(
-                  Icons.check_circle_outline,
-                  t('systemd_enable'),
-                  cs.primary,
+                  Icons.article_outlined,
+                  t('view_logs'),
+                  cs.secondary,
                   () {
                     Navigator.pop(ctx);
-                    onAction('enable');
-                  },
-                ),
-                _ServiceActionButton(
-                  Icons.block,
-                  t('systemd_disable'),
-                  cs.onSurface.withValues(alpha: 0.56),
-                  () {
-                    Navigator.pop(ctx);
-                    onAction('disable');
+                    onAction('logs');
                   },
                 ),
               ],
@@ -183,7 +268,10 @@ class _ServiceActionButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final Color c;
-  final VoidCallback fn;
+
+  /// Null disables the entry — used while the boot-state probe is still
+  /// running, where tapping would issue a command whose direction is unknown.
+  final VoidCallback? fn;
 
   const _ServiceActionButton(this.icon, this.label, this.c, this.fn);
 
