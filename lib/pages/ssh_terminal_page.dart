@@ -681,7 +681,9 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
   Future<void> _openSnippetManager() async {
     final picked = await Navigator.push<Snippet>(
       context,
-      MaterialPageRoute(builder: (_) => const SnippetListPage()),
+      MaterialPageRoute(
+        builder: (_) => const SnippetListPage(popWithSelection: true),
+      ),
     );
     if (picked == null || !mounted) return;
     await _injectSnippet(picked);

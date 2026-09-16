@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/theme/app_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +12,18 @@ import '../widgets/app_ui.dart';
 
 /// Page that lists all saved command snippets with add/edit/delete capabilities. /// 列出所有已保存快捷指令的页面，支持新增/编辑/删除。
 class SnippetListPage extends ConsumerStatefulWidget {
-  const SnippetListPage({super.key});
+  /// Whether a tap on a row hands that snippet back to the caller.
+  ///
+  /// True only when this page is opened as a *picker* — the terminal does that,
+  /// and awaits the result. Every other way in (the drawer, the `/snippets`
+  /// route) opens it to manage snippets, and there a tap used to pop the page
+  /// with a result nobody read: the tap closed the screen and did nothing else,
+  /// which reads as a broken row rather than as a page that was not a picker.
+  /// In those cases the tap copies the command instead, which is the useful
+  /// thing to do with a saved command you are looking at.
+  final bool popWithSelection;
+
+  const SnippetListPage({super.key, this.popWithSelection = false});
 
   @override
   ConsumerState<SnippetListPage> createState() => _SnippetListPageState();
@@ -93,8 +105,17 @@ class _SnippetListPageState extends ConsumerState<SnippetListPage> {
               return _SnippetTile(
                 snippet: snippet,
                 onTap: () {
-                  /// Return the selected snippet to the caller (e.g., terminal page). /// 将选中的指令返回给调用方（如终端页面）。
-                  Navigator.pop(context, snippet);
+                  if (widget.popWithSelection) {
+                    Navigator.pop(context, snippet);
+                    return;
+                  }
+                  Clipboard.setData(ClipboardData(text: snippet.command));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(t('copied')),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
                 },
                 onEdit: () => _showSnippetDialog(existing: snippet),
                 onDelete: () => _confirmDelete(snippet),
