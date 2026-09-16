@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/strings.dart';
+import '../../core/theme/app_fonts.dart';
 import '../../models/host.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/host_card.dart';
@@ -204,12 +205,26 @@ class HostConsoleIdentityCard extends StatelessWidget {
   /// 「离线」。
   final HostStatus status;
 
+  /// The stored host key this device trusts for this host, or null when there
+  /// is none.
+  ///
+  /// The key is what makes this card an answer to "is someone intercepting
+  /// me": the fingerprint can be compared against the one the server prints
+  /// (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) without opening a
+  /// second connection or leaving the screen.
+  final Map<String, Object?>? trustedKey;
+
+  /// Copies [value] and says so. Owned by the page, which holds the messenger.
+  final void Function(String value)? onCopy;
+
   const HostConsoleIdentityCard({
     super.key,
     required this.host,
     required this.hostname,
     required this.osInfo,
     required this.status,
+    this.trustedKey,
+    this.onCopy,
   });
 
   @override
@@ -285,13 +300,62 @@ class HostConsoleIdentityCard extends StatelessWidget {
                       color: hostStatusColor(cs, status),
                     ),
                     AppBadge(label: 'SSH :${host.port}', color: cs.secondary),
+                    if ((host.credentialUsername ?? '').isNotEmpty)
+                      AppBadge(
+                        label:
+                            '${t('username')}: ${host.credentialUsername}',
+                        color: cs.primary,
+                      ),
                   ],
                 ),
+                if (fingerprint case final key?) ...[
+                  const SizedBox(height: 6),
+                  // The key this device decided to trust for this host, shown
+                  // where the user is already looking when they suspect the
+                  // connection. Tapping copies it: comparing fingerprints is
+                  // done by eye against a value printed elsewhere, and typing a
+                  // 47-character MD5 from a phone screen is not.
+                  InkWell(
+                    onTap: onCopy == null ? null : () => onCopy!(key),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.key_outlined,
+                            size: 12,
+                            color: cs.onSurface.withValues(alpha: 0.36),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              key,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: cs.onSurface.withValues(alpha: 0.4),
+                                fontSize: 10,
+                                fontFamily: AppFonts.mono,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// The stored fingerprint, or null when this host has no recorded key yet.
+  String? get fingerprint {
+    final value = trustedKey?['fingerprint'];
+    return value is String && value.isNotEmpty ? value : null;
   }
 }

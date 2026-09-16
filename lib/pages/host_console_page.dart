@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/i18n/strings.dart';
@@ -8,6 +9,7 @@ import '../models/host.dart';
 import '../providers/providers.dart';
 import '../providers/ssh_provider.dart';
 import '../services/host_key_trust.dart';
+import '../services/known_hosts_store.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/host_key_prompt.dart';
@@ -150,6 +152,13 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
   bool _connecting = false;
   String? _monitorError;
   HostIdentity _identity = HostIdentity.unknown;
+
+  /// The host key this device trusts for this host, or null when none is
+  /// recorded. Loaded from the known-hosts table rather than from the live
+  /// connection, because it is the *stored* decision the identity card is
+  /// meant to surface — what this device accepted last time — and it is
+  /// available before, and without, a successful handshake.
+  Map<String, Object?>? _trustedKey;
   CpuTimes? _lastCpuTimes;
 
   /// The newest readings that were actually measured, or `null` while there are
@@ -178,6 +187,33 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
     )..repeat(reverse: true);
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _initMonitoring());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadTrustedKey());
+  }
+
+  /// Copies [value] and confirms it, so comparing a fingerprint elsewhere
+  /// does not mean retyping 47 characters from a phone screen.
+  void _copyToClipboard(String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(t('copied'))));
+  }
+
+  /// Reads the stored host key for this host into [_trustedKey].
+  Future<void> _loadTrustedKey() async {
+    try {
+      final db = await ref.read(databaseProvider.future);
+      final record = await KnownHostsStore(
+        db,
+      ).recordFor(hostKeyFor(widget.host.ipAddress, widget.host.port));
+      if (!mounted) return;
+      setState(() => _trustedKey = record);
+    } catch (_) {
+      // A card that cannot read the table simply shows no fingerprint. Failing
+      // the whole console over a missing row would trade a real connection for
+      // an optional detail.
+      return;
+    }
   }
 
   @override
@@ -657,6 +693,8 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
                 hostname: _identity.hostname,
                 osInfo: _identity.osInfo,
                 status: _status,
+                trustedKey: _trustedKey,
+                onCopy: _copyToClipboard,
               ),
             ),
             SliverToBoxAdapter(

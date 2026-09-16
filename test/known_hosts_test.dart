@@ -249,6 +249,25 @@ void main() {
       expect(all.first['trusted_at'], isA<String>());
     });
 
+    test('recordFor answers with the stored row, or null', () async {
+      // What the console's identity card reads: the key this device decided to
+      // trust for the host it is connected to. It is the screen a user opens
+      // when they suspect interception, so the lookup has to answer for a host
+      // that has a record and stay quiet for one that does not.
+      await trust('10.0.0.5:22', 'MD5:aa:bb');
+
+      final record = await store.recordFor('10.0.0.5:22');
+      expect(record, isNotNull);
+      expect(record!['fingerprint'], 'MD5:aa:bb');
+      expect(record['key_type'], 'ssh-ed25519');
+
+      expect(
+        await store.recordFor('10.0.0.9:22'),
+        isNull,
+        reason: 'a host with no record must not borrow another host\'s key',
+      );
+    });
+
     test('all is empty on a store with no records', () async {
       expect(await store.all(), isEmpty);
     });

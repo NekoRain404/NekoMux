@@ -115,6 +115,22 @@ class KnownHostsStore {
     await _db.delete(table, where: 'host = ?', whereArgs: [host]);
   }
 
+  /// The record for [host], or null when there is none.
+  ///
+  /// Handed to the console's identity card, which is the screen a user opens
+  /// when they suspect the connection is being intercepted: it can show the key
+  /// this device decided to trust, next to the one the server presents now,
+  /// without opening a second connection to ask.
+  Future<Map<String, Object?>?> recordFor(String host) async {
+    final rows = await _db.query(
+      table,
+      where: 'host = ?',
+      whereArgs: [host],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
   /// Every recorded host key, ordered by host for stable display.
   /// 全部已记录的主机密钥，按主机排序以便稳定展示。
   Future<List<Map<String, Object?>>> all() {
