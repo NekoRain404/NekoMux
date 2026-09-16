@@ -153,6 +153,9 @@ const Map<String, String> koStrings = <String, String>{
   'key_invalid_format': '잘못된 형식: 키는 -----BEGIN ... PRIVATE KEY----- 로 시작해야 합니다',
   'key_incomplete': '불완전한 형식: 종료 마커가 없습니다',
   'confirm_delete': '삭제 확인',
+  'confirm_overwrite_title': '덮어쓸까요?',
+  'confirm_overwrite_file': '서버에 "{0}"이(가) 이미 있습니다. 덮어쓰면 내용이 교체되며 되돌릴 수 없습니다.',
+  'confirm_overwrite_many': '선택한 파일 중 {0}개가 서버에 이미 있어 교체됩니다.',
   'confirm_delete_credential':
       '자격 증명 "{0}"을(를) 삭제하시겠습니까?\n이 자격 증명을 사용하는 호스트의 연결이 끊어집니다.',
   'confirm_delete_snippet': '스니펫 "{0}"을(를) 삭제하시겠습니까?',

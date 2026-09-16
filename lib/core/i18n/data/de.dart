@@ -157,6 +157,9 @@ const Map<String, String> deStrings = <String, String>{
       'Ungültiges Format: Schlüssel muss mit -----BEGIN ... PRIVATE KEY----- beginnen',
   'key_incomplete': 'Unvollständiges Format: Endmarkierung fehlt',
   'confirm_delete': 'Löschen bestätigen',
+  'confirm_overwrite_title': 'Überschreiben?',
+  'confirm_overwrite_file': '"{0}" existiert bereits auf dem Server. Überschreiben ersetzt den Inhalt und lässt sich nicht rückgängig machen.',
+  'confirm_overwrite_many': '{0} der ausgewählten Dateien existieren bereits auf dem Server und würden ersetzt.',
   'confirm_delete_credential':
       'Anmeldedaten "{0}" löschen?\nHosts mit diesen Anmeldedaten verlieren die Verbindung.',
   'confirm_delete_snippet': 'Snippet "{0}" löschen?',

@@ -89,28 +89,35 @@ class UploadPick {
   bool get canUpload => !cancelled && path != null && path!.isNotEmpty;
 }
 
-/// Asks the user for a file to upload.
-/// 向用户询问要上传的文件。
+/// Asks the user for one or more files to upload.
+///
+/// Empty means the user dismissed the picker. `FilePicker.pickFiles()` — the
+/// multi-selection entry point, as opposed to `pickFile()` — lets the user tick
+/// several files, and taking only the first one silently threw the rest away:
+/// the picker closed, one upload appeared, and the other files the user had
+/// deliberately selected were never mentioned again. Uploading a handful of
+/// files is the ordinary case for a file manager, so every pick is returned and
+/// the caller queues each one.
 ///
 /// The size comes from `lengthSync`, which answers from what the picker already
 /// reported without touching the disk; a zero or missing size becomes null so
 /// the queue measures the file itself instead of showing a 0-byte total — a
 /// genuinely empty file is measured to 0 by the runner anyway, and a progress
 /// bar for it is meaningless either way.
-/// 大小取自 `lengthSync`，它直接回答选择器已报告的值而不触碰磁盘；为 0 或缺失时转为
-/// null，让队列自己去量，而不是显示一个 0 字节的总数——空文件本来就会被 runner 量成
-/// 0，而且对它来说进度条无论如何都没有意义。
-Future<UploadPick> pickUploadFile() async {
+Future<List<UploadPick>> pickUploadFiles() async {
   final files = await FilePicker.pickFiles();
-  if (files.isEmpty) return const UploadPick(cancelled: true);
-
-  final file = files.first;
-  final size = file.lengthSync();
-  return UploadPick(
-    path: file.path,
-    name: file.name,
-    size: (size != null && size > 0) ? size : null,
-  );
+  final picks = <UploadPick>[];
+  for (final file in files) {
+    final size = file.lengthSync();
+    picks.add(
+      UploadPick(
+        path: file.path,
+        name: file.name,
+        size: (size ?? 0) > 0 ? size : null,
+      ),
+    );
+  }
+  return picks;
 }
 
 /// The directory downloads are staged in until they are saved somewhere.

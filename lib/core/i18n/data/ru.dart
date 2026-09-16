@@ -156,6 +156,9 @@ const Map<String, String> ruStrings = <String, String>{
       'Неверный формат: ключ должен начинаться с -----BEGIN ... PRIVATE KEY-----',
   'key_incomplete': 'Неполный формат: отсутствует конечный маркер',
   'confirm_delete': 'Подтвердить удаление',
+  'confirm_overwrite_title': 'Перезаписать?',
+  'confirm_overwrite_file': '«{0}» уже есть на сервере. Перезапись заменит его содержимое без возможности отмены.',
+  'confirm_overwrite_many': '{0} из выбранных файлов уже есть на сервере и будут заменены.',
   'confirm_delete_credential':
       'Удалить учётные данные "{0}"?\nХосты, использующие их, потеряют подключение.',
   'confirm_delete_snippet': 'Удалить сниппет "{0}"?',

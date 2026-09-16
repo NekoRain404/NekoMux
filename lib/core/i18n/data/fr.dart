@@ -158,6 +158,9 @@ const Map<String, String> frStrings = <String, String>{
       'Format invalide : la clé doit commencer par -----BEGIN ... PRIVATE KEY-----',
   'key_incomplete': 'Format incomplet : marqueur de fin manquant',
   'confirm_delete': 'Confirmer la suppression',
+  'confirm_overwrite_title': 'Écraser ?',
+  'confirm_overwrite_file': '"{0}" existe déjà sur le serveur. L\'écraser remplace son contenu, sans retour possible.',
+  'confirm_overwrite_many': '{0} des fichiers sélectionnés existent déjà sur le serveur et seraient remplacés.',
   'confirm_delete_credential':
       'Supprimer l\'identifiant "{0}" ?\nLes hôtes utilisant cet identifiant perdront la connexion.',
   'confirm_delete_snippet': 'Supprimer l\'extrait "{0}" ?',

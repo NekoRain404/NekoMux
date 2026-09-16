@@ -157,6 +157,9 @@ const Map<String, String> enStrings = <String, String>{
       'Invalid format: key must start with -----BEGIN ... PRIVATE KEY-----',
   'key_incomplete': 'Incomplete format: missing end marker',
   'confirm_delete': 'Confirm Delete',
+  'confirm_overwrite_title': 'Overwrite?',
+  'confirm_overwrite_file': '"{0}" already exists on the server. Overwriting replaces its contents and cannot be undone.',
+  'confirm_overwrite_many': '{0} of the selected files already exist on the server and would be replaced.',
   'confirm_delete_credential':
       'Delete credential "{0}"?\nHosts using this credential will lose connectivity.',
   'confirm_delete_snippet': 'Delete snippet "{0}"?',

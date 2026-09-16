@@ -157,6 +157,9 @@ const Map<String, String> esStrings = <String, String>{
       'Formato inválido: la clave debe comenzar con -----BEGIN ... PRIVATE KEY-----',
   'key_incomplete': 'Formato incompleto: falta el marcador final',
   'confirm_delete': 'Confirmar eliminación',
+  'confirm_overwrite_title': '¿Sobrescribir?',
+  'confirm_overwrite_file': '"{0}" ya existe en el servidor. Sobrescribirlo reemplaza su contenido y no se puede deshacer.',
+  'confirm_overwrite_many': '{0} de los archivos seleccionados ya existen en el servidor y se reemplazarían.',
   'confirm_delete_credential':
       '¿Eliminar credencial "{0}"?\nLos hosts que usan esta credencial perderán conectividad.',
   'confirm_delete_snippet': '¿Eliminar fragmento "{0}"?',

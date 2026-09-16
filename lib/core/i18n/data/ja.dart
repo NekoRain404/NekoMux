@@ -154,6 +154,9 @@ const Map<String, String> jaStrings = <String, String>{
   'key_invalid_format': '無効な形式: 鍵は -----BEGIN ... PRIVATE KEY----- で始まる必要があります',
   'key_incomplete': '不完全な形式: 終了マーカーがありません',
   'confirm_delete': '削除の確認',
+  'confirm_overwrite_title': '上書きしますか？',
+  'confirm_overwrite_file': 'サーバーに「{0}」が既に存在します。上書きすると内容が置き換わり、元に戻せません。',
+  'confirm_overwrite_many': '選択したファイルのうち {0} 個がサーバーに既に存在し、置き換えられます。',
   'confirm_delete_credential':
       '認証情報 "{0}" を削除しますか？\nこの認証情報を使用するホストは接続できなくなります。',
   'confirm_delete_snippet': 'スニペット "{0}" を削除しますか？',

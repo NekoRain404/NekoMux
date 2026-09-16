@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +29,41 @@ import 'transfer_fake_session.dart';
 /// 选择器是这里唯一既无法在 widget 测试中显示、也无法按下的部分——在 Android 上它们是
 /// 原生对话框——因此这里检验的是本应用与它们之间的契约：哪些字节以哪个名字交给
 /// `saveFile`、它的每种答复各意味着什么，以及在这一切发生之前下载被暂存到哪个文件。
+
+/// A picked file the fake picker hands back.
+///
+/// `PlatformFile` is a `base` class, so it is extended rather than implemented.
+/// Only the members `pickUploadFiles` reads are backed by a value — the name,
+/// the path and the sync length — and the rest throw, so a test that starts
+/// relying on one of them fails where it is read rather than quietly passing.
+final class _StubPlatformFile extends PlatformFile {
+  _StubPlatformFile(this.uri, this._size);
+
+  @override
+  final Uri uri;
+
+  final int _size;
+
+  @override
+  String get name => uri.pathSegments.last;
+
+  @override
+  int? lengthSync() => _size;
+
+  @override
+  Future<int?> length() async => _size;
+
+  @override
+  XFile get xFile => throw UnimplementedError('not read by pickUploadFiles');
+
+  @override
+  Future<Uint8List> readAsBytes() =>
+      throw UnimplementedError('not read by pickUploadFiles');
+
+  @override
+  Stream<Uint8List> readAsByteStream({int? chunkSize}) =>
+      throw UnimplementedError('not read by pickUploadFiles');
+}
 
 /// A [FilePickerPlatform] that answers with whatever the test told it to.
 /// 按测试指示作答的 [FilePickerPlatform]。
@@ -118,10 +154,10 @@ void writeSparseFile(String path, int bytes) {
 
 /// A page-less caller of the queueing helpers, standing in for the SFTP page.
 /// 一个不依赖页面、代表 SFTP 页面调用入队辅助函数的调用方。
-class _Harness extends ConsumerWidget {
+class _Harness<T> extends ConsumerWidget {
   const _Harness({required this.run});
 
-  final Future<TransferQueueOutcome> Function(WidgetRef ref) run;
+  final Future<T> Function(WidgetRef ref) run;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => TextButton(
@@ -165,10 +201,10 @@ void main() {
 
   /// Runs [run] on the harness and returns the queue afterwards.
   /// 在测试宿主上执行 [run]，随后返回队列内容。
-  Future<List<TransferTask>> runAndRead(
+  Future<List<TransferTask>> runAndRead<T>(
     WidgetTester tester,
     ProviderContainer container,
-    Future<TransferQueueOutcome> Function(WidgetRef ref) run,
+    Future<T> Function(WidgetRef ref) run,
   ) async {
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -247,24 +283,61 @@ void main() {
       expect(container.read(transferQueueProvider), isEmpty);
     });
 
+    testWidgets('every file of a multi-selection is queued', (tester) async {
+      // The regression: the picker allows multi-selection, and the old code
+      // kept `files.first` and dropped the rest — the picker closed, one upload
+      // appeared, and the other files the user had deliberately chosen were
+      // never mentioned again.
+      final container = idleContainer();
+      picker.picked = [
+        _StubPlatformFile(Uri.file('/tmp/a.conf'), 10),
+        _StubPlatformFile(Uri.file('/tmp/b.conf'), 20),
+        _StubPlatformFile(Uri.file('/tmp/c.conf'), 30),
+      ];
+      late BatchUploadResult outcome;
+
+      await runAndRead(tester, container, (ref) async {
+        outcome = queueUploads(
+          ref,
+          hostId: 'h1',
+          remoteDir: '/etc',
+          picks: await pickUploadFiles(),
+        );
+        return outcome;
+      });
+
+      expect(outcome.outcome, TransferQueueOutcome.queued);
+      expect(outcome.queued, 3);
+      final tasks = container.read(transferQueueProvider);
+      expect(tasks, hasLength(3));
+      expect(
+        tasks.map((task) => task.remotePath),
+        ['/etc/a.conf', '/etc/b.conf', '/etc/c.conf'],
+        reason: 'each file goes to the directory the page is showing',
+      );
+      expect(tasks.map((task) => task.totalBytes), [10, 20, 30]);
+    });
+
     testWidgets('a dismissed picker queues nothing and says nothing', (
       tester,
     ) async {
       final container = idleContainer();
       picker.picked = const <PlatformFile>[]; // empty is the documented cancel
-      late TransferQueueOutcome outcome;
+      late BatchUploadResult outcome;
 
       await runAndRead(tester, container, (ref) async {
-        outcome = await queueUploadFromPicker(
+        outcome = queueUploads(
           ref,
           hostId: 'h1',
           remoteDir: '/etc',
+          picks: await pickUploadFiles(),
         );
         return outcome;
       });
 
       expect(picker.pickCalls, 1);
-      expect(outcome, TransferQueueOutcome.cancelled);
+      expect(outcome.queued, 0);
+      expect(outcome.outcome, TransferQueueOutcome.cancelled);
       expect(container.read(transferQueueProvider), isEmpty);
     });
 
@@ -272,7 +345,8 @@ void main() {
       tester,
     ) async {
       final container = idleContainer();
-      late TransferQueueOutcome outcome;
+      late UploadPickResult picked;
+      late BatchUploadResult outcome;
 
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -289,10 +363,12 @@ void main() {
                   // 会从平台通道抛出，正是同一次调用抛出的异常。
                   FilePickerPlatform.instance = _ThrowingPicker();
                   try {
-                    outcome = await queueUploadFromPicker(
+                    picked = await pickUploadsSafely();
+                    outcome = queueUploads(
                       ref,
                       hostId: 'h1',
                       remoteDir: '/etc',
+                      picks: picked.picks,
                     );
                   } finally {
                     FilePickerPlatform.instance = picker;
@@ -307,7 +383,9 @@ void main() {
       await tester.tap(find.text('go'));
       await tester.pump();
 
-      expect(outcome, TransferQueueOutcome.localIo);
+      expect(picked.failed, isTrue, reason: 'the failure must be reported');
+      expect(picked.picks, isEmpty);
+      expect(outcome.queued, 0);
       expect(container.read(transferQueueProvider), isEmpty);
     });
   });

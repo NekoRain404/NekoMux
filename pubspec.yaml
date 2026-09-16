@@ -36,6 +36,11 @@ dev_dependencies:
   # 服务器运行随包发布的代码——见 integration_test/README.md。
   integration_test:
     sdk: flutter
+  # Declared for the test that stands in for a picked file. `PlatformFile` is a
+  # `base` class that must be extended to be faked, and one of the members it
+  # declares returns an `XFile` — a type that arrives transitively through
+  # file_picker and is named here so the dependency is explicit.
+  cross_file: ^0.3.4
   flutter_lints: ^6.0.0
 
 flutter:

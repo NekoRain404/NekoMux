@@ -50,21 +50,84 @@ enum TransferQueueOutcome {
 /// Returns as soon as the task is in the list: the picker is the only thing the
 /// user waits on, and the transfer itself never blocks them.
 /// 任务入列后立即返回：用户唯一需要等待的只有选择器，传输本身从不阻塞他们。
-Future<TransferQueueOutcome> queueUploadFromPicker(
+/// The outcome of asking the platform which files to upload.
+class UploadPickResult {
+  /// What the picker returned; empty when it was dismissed or it failed.
+  final List<UploadPick> picks;
+
+  /// True when the picker itself threw — a platform-channel failure, which has
+  /// no task to appear on and no row to explain itself, so the caller has to
+  /// say something.
+  final bool failed;
+
+  const UploadPickResult(this.picks, {this.failed = false});
+}
+
+/// Asks for files to upload, turning a failed picker into a reported value.
+///
+/// The picker is a platform channel, and a channel that fails throws where it is
+/// called: out of the tap handler, in a build-invalidating place, with nothing
+/// queued and no explanation shown. Catching it here keeps that from being the
+/// user's whole experience of tapping upload.
+Future<UploadPickResult> pickUploadsSafely() async {
+  try {
+    return UploadPickResult(await pickUploadFiles());
+  } catch (_) {
+    return const UploadPickResult([], failed: true);
+  }
+}
+
+/// Queues one upload per pick, and counts what got in.
+///
+/// The picking itself is the page's: it may want to ask something about the
+/// picks first (whether they would replace files already on the server, say),
+/// and a helper that picked and queued in one step would leave nowhere to put
+/// that question. What stays here is the queueing rule, once.
+BatchUploadResult queueUploads(
   WidgetRef ref, {
   required String hostId,
   required String remoteDir,
-}) async {
-  final UploadPick picked;
-  try {
-    picked = await pickUploadFile();
-  } catch (e) {
-    // A picker that threw. Nothing reached the queue, so there is no task to
-    // carry the report.
-    // 选择器抛出异常。什么都没有到达队列，因此没有任务可以承载这条报告。
-    return TransferQueueOutcome.localIo;
+  required List<UploadPick> picks,
+}) {
+  // An empty list is a dismissed picker, not a successful queue of nothing. It
+  // is reported as such rather than as `queued` with a zero count, which is the
+  // shape a caller reads as "it worked" and then cannot tell apart from a real
+  // failure to enqueue.
+  if (picks.isEmpty) {
+    return const BatchUploadResult(0, TransferQueueOutcome.cancelled);
   }
-  return queueUpload(ref, hostId: hostId, remoteDir: remoteDir, pick: picked);
+
+  var queued = 0;
+  var outcome = TransferQueueOutcome.queued;
+  for (final pick in picks) {
+    final result = queueUpload(
+      ref,
+      hostId: hostId,
+      remoteDir: remoteDir,
+      pick: pick,
+    );
+    if (result == TransferQueueOutcome.queued) {
+      queued++;
+    } else {
+      // One unusable pick must not abort the rest: a document-provider file
+      // that cannot be read is a reason to skip that file, not to drop the
+      // four the user chose alongside it.
+      outcome = result;
+    }
+  }
+  return BatchUploadResult(queued, outcome);
+}
+
+/// How many picks reached the queue, and whether any did not.
+class BatchUploadResult {
+  /// Number of uploads queued.
+  final int queued;
+
+  /// [TransferQueueOutcome.queued] when every pick was queued, otherwise the
+  /// device-side failure one of them hit.
+  final TransferQueueOutcome outcome;
+
+  const BatchUploadResult(this.queued, this.outcome);
 }
 
 /// Queues [pick] as an upload into [remoteDir] on [hostId].

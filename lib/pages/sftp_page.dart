@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +12,7 @@ import '../providers/ssh_provider.dart';
 import '../providers/transfer_provider.dart';
 import '../services/host_key_trust.dart';
 import '../services/sftp_service.dart';
+import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
 import 'sftp/directory_load_state.dart';
 import 'sftp/file_selection.dart';
@@ -23,10 +23,12 @@ import 'sftp/sftp_file_list.dart';
 import 'sftp/sftp_file_open.dart';
 import 'sftp/sftp_path.dart';
 import 'sftp/sftp_path_entry.dart';
+import 'sftp/sftp_remote_writes.dart';
 import 'sftp/sftp_status_view.dart';
 import 'transfer/transfer_actions.dart';
 import 'transfer/transfer_format.dart';
 import 'transfer/transfer_indicator.dart';
+import 'transfer/transfer_io.dart';
 import 'transfer/transfer_sheet.dart';
 
 /// SFTP file manager with directory browsing and file operations.
@@ -405,13 +407,88 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     }
   }
 
-  /// Picks a local file and queues it into the directory on screen — the path
-  /// the bar names, which is what every other write on this page targets too.
-  /// 挑选一个本地文件并把它排入屏幕上显示的目录——路径栏所示、也是本页其它每一处写入
-  /// 所针对的那个路径。
-  void _queueUpload() => _reportTransfer(
-    queueUploadFromPicker(ref, hostId: widget.host.id, remoteDir: _currentDir),
-  );
+  /// Picks one or more local files and queues them into the directory on screen
+  /// — the path the bar names, which is what every other write on this page
+  /// targets too.
+  /// 挑选一个或多个本地文件并把它们排入屏幕上显示的目录——路径栏所示、也是本页其它每一处
+  /// 写入所针对的那个路径。
+  ///
+  /// The picker allows multi-selection, and every chosen file is queued: a
+  /// selection of five used to send only the first, with nothing on screen to say
+  /// the other four had been dropped. The count is reported whenever it differs
+  /// from one, so the row of transfers the user is about to see matches what they
+  /// picked.
+  /// 选择器允许多选，且每个被选中的文件都会入队：过去一次五选只发第一个，而屏幕上没有任何
+  /// 东西说明另外四个已被丢弃。只要数量不为 1 就报出这个数量，使用户即将看到的那批传输与
+  /// 他们的选择相符。
+  Future<void> _queueUpload() async {
+    final picked = await pickUploadsSafely();
+    if (!mounted) return;
+    if (picked.failed) {
+      // Nothing reached the queue, so no transfer row can carry this report.
+      _showSnack(t('transfer_error_local_io'), isError: true);
+      return;
+    }
+    if (picked.picks.isEmpty) return;
+    final picks = picked.picks;
+
+    if (!await _confirmUploadOverwrite(picks)) return;
+    if (!mounted) return;
+
+    final result = queueUploads(
+      ref,
+      hostId: widget.host.id,
+      remoteDir: _currentDir,
+      picks: picks,
+    );
+    if (!mounted) return;
+    if (result.outcome == TransferQueueOutcome.localIo) {
+      _showSnack(t('transfer_error_local_io'), isError: true);
+      return;
+    }
+    if (result.queued > 1) _showSnack(batchUploadReport(result.queued));
+  }
+
+  /// Asks before an upload would replace a file that is already there.
+  ///
+  /// The upload opens its remote path with `truncate`, so dropping a file into a
+  /// directory that already holds that name destroys the server's copy with no
+  /// warning at all — and the file in hand is very often a different file that
+  /// happens to share a name (two builds of `app.apk`, two days of
+  /// `access.log`). Only names that already exist are counted, so the question
+  /// is asked when it is real rather than on every upload.
+  Future<bool> _confirmUploadOverwrite(List<UploadPick> picks) async {
+    final service = _sftpService;
+    if (service == null) return false;
+
+    final clashing = <String>[];
+    for (final pick in picks) {
+      if (!pick.canUpload) continue;
+      try {
+        if (await service.exists(sftpChildPath(_currentDir, pick.name))) {
+          clashing.add(pick.name);
+        }
+      } on SftpException {
+        // A path that cannot be checked is not evidence of a collision, and
+        // refusing the upload because a stat failed would be worse than letting
+        // the transfer report its own failure.
+        continue;
+      }
+    }
+    if (clashing.isEmpty) return true;
+    if (!mounted) return false;
+
+    return showAppConfirmDialog(
+      context,
+      title: t('confirm_overwrite_title'),
+      message: clashing.length == 1
+          ? t('confirm_overwrite_file').replaceAll('{0}', clashing.single)
+          : t('confirm_overwrite_many').replaceAll('{0}', '${clashing.length}'),
+      cancelLabel: t('cancel'),
+      confirmLabel: t('confirm'),
+      destructive: true,
+    );
+  }
 
   /// Queues a download of [file] into this app's staging area; the destination
   /// is chosen on the finished row (see [queueDownloadToStaging]).
@@ -501,122 +578,72 @@ class _SftpPageState extends ConsumerState<SftpPage> {
   /// Renames [file] to the name the user types.
   /// 将 [file] 重命名为用户输入的名称。
   Future<void> _showRenameDialog(FileItem file) async {
-    final name = await showSftpNameDialog(
+    final service = _sftpService;
+    if (service == null) return;
+    await renameSftpEntry(
       context,
-      title: t('rename'),
-      hint: file.name,
-      initial: file.name,
-      confirmLabel: t('confirm'),
+      service: service,
+      dir: _currentDir,
+      file: file,
+      notify: _showSnack,
     );
-    if (name == null || !mounted) return;
-
-    try {
-      await _sftpService!.rename(file.path, sftpChildPath(_currentDir, name));
-      if (!mounted) return;
-      await _loadDirectory(_currentDir);
-      if (mounted) _showSnack(t('file_renamed'));
-    } on SftpException catch (e) {
-      if (mounted) _showSnack(sftpErrorText(e), isError: true);
-    }
+    if (!mounted) return;
+    await _loadDirectory(_currentDir);
   }
 
   /// Deletes one entry after confirming.
   /// 确认后删除单个条目。
   Future<void> _confirmDeleteFile(FileItem file) async {
-    final confirmed = await confirmSftpDelete(context, file.name);
-    if (!confirmed || !mounted) return;
-
-    try {
-      await _sftpService!.deleteFile(file.path);
-      if (!mounted) return;
-      await _loadDirectory(_currentDir);
-      if (mounted) _showSnack(t('file_deleted'));
-    } on SftpException catch (e) {
-      if (mounted) _showSnack(sftpErrorText(e), isError: true);
-    }
+    final service = _sftpService;
+    if (service == null) return;
+    await deleteSftpEntry(
+      context,
+      service: service,
+      file: file,
+      notify: _showSnack,
+    );
+    if (!mounted) return;
+    await _loadDirectory(_currentDir);
   }
 
   /// The "new file / new folder" flow: choose a kind, name it, create it.
   /// 「新建文件 / 新建文件夹」流程：选择类型、命名、创建。
+  ///
+  /// The asking, the overwrite guard and the write live in [createSftpEntry];
+  /// reloading the directory is this page's half, because it is the page that
+  /// knows which directory the bar is showing.
   Future<void> _showNewEntryDialog() async {
-    final kind = await showSftpNewEntryChooser(context);
-    if (kind == null || !mounted) return;
-
-    final isFolder = kind == SftpNewEntryKind.folder;
-    final name = await showSftpNameDialog(
+    final service = _sftpService;
+    if (service == null) return;
+    await createSftpEntry(
       context,
-      title: isFolder ? t('new_folder') : t('new_file_item'),
-      hint: isFolder ? t('input_foldername') : t('input_filename'),
-      confirmLabel: t('create'),
+      service: service,
+      dir: _currentDir,
+      notify: _showSnack,
     );
-    if (name == null || !mounted) return;
-
-    final path = sftpChildPath(_currentDir, name);
-    try {
-      if (isFolder) {
-        await _sftpService!.createDirectory(path);
-      } else {
-        await _sftpService!.writeFile(path, Uint8List(0));
-      }
-      if (!mounted) return;
-      await _loadDirectory(_currentDir);
-      if (mounted) {
-        _showSnack(isFolder ? t('folder_created') : t('file_created'));
-      }
-    } on SftpException catch (e) {
-      if (mounted) _showSnack(sftpErrorText(e), isError: true);
-    }
+    if (!mounted) return;
+    await _loadDirectory(_currentDir);
   }
 
   /// Deletes every selected path, then reports what actually happened.
   /// 删除全部已选路径，然后如实报告结果。
   Future<void> _showBatchDeleteConfirm() async {
+    final service = _sftpService;
     final paths = _selection.paths.toList();
-    if (paths.isEmpty) return;
+    if (service == null || paths.isEmpty) return;
 
     final confirmed = await confirmSftpBatchDelete(context, paths);
     if (!confirmed || !mounted) return;
 
     setState(_selection.clear);
-
-    var failed = 0;
-    for (final path in paths) {
-      try {
-        await _sftpService!.deleteFile(path);
-      } on SftpException catch (e) {
-        failed++;
-        if (mounted) _showSnack(sftpErrorText(e), isError: true);
-      } catch (e) {
-        failed++;
-        // Not an SftpException, so there is no code to map; report it as a
-        // failed delete with its detail rather than showing a raw exception.
-        // 不是 SftpException，因此没有编码可映射；按删除失败上报并附带细节，
-        // 而不是把原始异常直接显示出来。
-        if (mounted) {
-          _showSnack(sftpFailureText(SftpFailure.delete, '$e'), isError: true);
-        }
-      }
-    }
-
+    await deleteSftpEntries(
+      context,
+      service: service,
+      paths: paths,
+      notify: _showSnack,
+    );
     if (!mounted) return;
     await _loadDirectory(_currentDir);
-    if (!mounted) return;
-
-    // A blanket "deleted" used to be shown even when every single delete had
-    // failed, so the last thing the user read was a success message. Report the
-    // failures by count instead; each reason was already shown per file.
-    // 即使每一个删除都失败，此前也无条件显示「已删除」，让成功提示成为用户最后读到的
-    // 一句话。这里改为按数量报告失败；每条失败原因已在上面逐个提示过。
-    if (failed == 0) {
-      _showSnack(t('file_deleted'));
-    } else {
-      _showSnack(
-        t('service_action_failed')
-            .replaceAll('{0}', t('batch_delete'))
-            .replaceAll('{1}', '$failed/${paths.length}'),
-        isError: true,
-      );
-    }
   }
 
   void _enterSelectionMode(String path) =>

@@ -173,6 +173,13 @@ SftpFailure _fallbackFailure(TransferDirection direction) =>
 String batchDownloadReport({required int queued, required int selected}) =>
     '${t('selected')}: $selected · ${t('download')}: $queued';
 
+/// "Upload: N" for a pick that may have carried several files.
+///
+/// The count is the point. A multi-selection used to queue only its first file
+/// and say nothing, so the report is what makes the difference between "the four
+/// files I chose are on their way" and "one of the four did".
+String batchUploadReport(int queued) => '${t('upload')}: $queued';
+
 /// Whether any task in [tasks] still has work to do.
 /// [tasks] 中是否仍有任务有待完成。
 bool hasActiveTransfers(List<TransferTask> tasks) =>
