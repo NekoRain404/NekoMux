@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/app_info.dart';
 import '../core/i18n/strings.dart';
+import 'brand_mark.dart';
 import '../pages/credential_list_page.dart';
 import '../pages/snippet_list_page.dart';
 import '../pages/settings_page.dart';
@@ -68,7 +69,16 @@ class AppDrawer extends ConsumerWidget {
                       color: cs.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(Icons.terminal, color: cs.primary, size: 24),
+                    // The app's own mark, not a generic terminal glyph: this
+                    // header is the first thing the drawer shows and the only
+                    // place in the app that stands in for the icon.
+                    child: Center(
+                      child: BrandMark(
+                        size: 30,
+                        color: cs.primary,
+                        cursorColor: cs.secondary,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Text(

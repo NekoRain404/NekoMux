@@ -3,9 +3,9 @@
 //
 // Both constants must be kept in step with `pubspec.yaml` BY HAND. The name
 // mirrors the package/description there; the version mirrors its `version:`
-// field, which is currently `1.0.0+1` — the `+1` is the build number Flutter
-// stamps onto every APK, not part of the version a user is shown, so it stays
-// out of [appVersion].
+// field, which is currently `2.0.0+2002` — the build number Flutter stamps onto
+// every APK is not part of the version a user is shown, so it stays out of
+// [appVersion].
 // 两个常量都必须与 `pubspec.yaml` 手工保持同步：名称对应其中的包名/描述，版本对应
 // `version:` 字段（当前为 `1.0.0+1`——`+1` 是 Flutter 打进每个 APK 的构建号，
 // 不属于展示给用户的版本号，因此不写进 [appVersion]）。
@@ -26,8 +26,17 @@
 /// 应用名称，用于抽屉页眉、任务切换器标题与关于对话框。
 const String appName = 'NekoMux';
 
-/// User-visible version, without the `+build` suffix — `1.0.0` for a pubspec of
-/// `version: 1.0.0+1`.
-/// 用户可见的版本号，不含 `+构建号` 后缀——pubspec 中的 `version: 1.0.0+1` 对应
-/// `1.0.0`。
-const String appVersion = '1.0.0';
+/// User-visible version, without the `+build` suffix — `2.0.0` for a pubspec of
+/// `version: 2.0.0+2002`.
+///
+/// It had drifted to `1.0.0` against a `2.0.0+2002` pubspec, so the About dialog
+/// and the drawer footer would have told a user of the first release that they
+/// were running a version two majors behind — on the one screen they open to
+/// report which version they are on.
+/// 用户可见的版本号，不含 `+构建号` 后缀——pubspec 中的 `version: 2.0.0+2002` 对应
+/// `2.0.0`。
+///
+/// 它此前与 `2.0.0+2002` 的 pubspec 脱节，仍是 `1.0.0`：于是首个正式版的用户会在
+/// 「关于」与抽屉页脚里看到自己落后了两个大版本——而那正是他们为了报告版本号才会
+/// 打开的那一屏。
+const String appVersion = '2.0.0';

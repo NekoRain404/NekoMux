@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The adaptive icon: Android 8 and later masks these two layers to whatever
+  shape the launcher uses, so the device — not this file — decides whether the
+  icon is a circle, a squircle or a rounded square.
+
+  Both layers are the full 108 dp canvas. The mark in `ic_launcher_foreground`
+  stays inside the central 72 dp, which is the part every mask keeps; see
+  `assets/icon/icon_foreground.svg` for the geometry and why.
+
+  The pre-Android-8 bitmaps in `mipmap-*/ic_launcher.png` are generated from the
+  same artwork by `tool/generate_icons.sh`.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>

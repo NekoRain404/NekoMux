@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NekoMux launcher icon — the adaptive icon's background layer.
+
+  Full-bleed on purpose: the launcher masks this layer to whatever shape the
+  device uses, so it must not carry a rounded rectangle of its own — that shape
+  would show as a square inside a circle on a round-masked launcher.
+
+  Same gradient as `icon_full.svg`, so a device on adaptive icons and one on the
+  legacy bitmaps see the same surface.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="108" height="108" viewBox="0 0 108 108">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#182019"/>
+      <stop offset="1" stop-color="#0C110D"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="108" height="108" fill="url(#bg)"/>
+</svg>

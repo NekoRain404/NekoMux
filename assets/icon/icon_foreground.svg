@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NekoMux launcher icon — the mark itself, on nothing.
+
+  Two cat ears and a shell prompt. The name is 猫 + mux, and the two things the
+  app does are reach a machine and run something on it, so the mark is both at
+  once: ears over `>_`.
+
+  Drawn for the Android adaptive-icon safe zone: the 108×108 canvas is the full
+  layer, and every visible point stays inside the 36-unit radius circle around
+  (54, 54) that a circular mask keeps. The geometry is therefore final — the
+  launcher, not this file, decides the shape it is cut to.
+
+  Two colours and four solid shapes, deliberately: at 48 px the whole icon is
+  24 px of ink, and anything finer (a knock-out cursor, an outline frame, a
+  third colour) collapses into a smudge at that size.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="108" height="108" viewBox="0 0 108 108">
+  <!-- The ears: solid triangles, outer edge vertical, inner edge sloped. -->
+  <polygon points="30,46 30,28 46,46" fill="#8FBC8B"/>
+  <polygon points="78,46 78,28 62,46" fill="#8FBC8B"/>
+  <path d="M 33 57 L 46 67 L 33 77" fill="none" stroke="#8FBC8B"
+        stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="56" y="74" width="22" height="6" rx="3" fill="#82A6B1"/>
+</svg>
