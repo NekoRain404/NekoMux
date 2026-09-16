@@ -94,6 +94,8 @@ const Map<String, String> ruStrings = <String, String>{
   'go_to_path_hint': 'Абсолютный путь, напр. /var/log. `~` не раскрывается.',
   'download': 'Скачать',
   'chmod': 'Права доступа',
+  'chmod_invalid': 'Введите три восьмеричные цифры, напр. 755',
+  'permissions_changed': 'Права изменены',
   'new_file': 'Создать',
   'upload': 'Загрузить файл',
   'modules': 'Модули',

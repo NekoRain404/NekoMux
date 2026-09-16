@@ -93,6 +93,8 @@ const Map<String, String> jaStrings = <String, String>{
   'go_to_path_hint': '絶対パス（例: /var/log）。`~` は展開されません。',
   'download': 'ダウンロード',
   'chmod': '権限変更',
+  'chmod_invalid': '8進数3桁を入力してください（例: 755）',
+  'permissions_changed': 'パーミッションを変更しました',
   'new_file': '新規作成',
   'upload': 'ファイルをアップロード',
   'modules': 'モジュール',

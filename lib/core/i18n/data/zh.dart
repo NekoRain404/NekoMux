@@ -92,6 +92,8 @@ const Map<String, String> zhStrings = <String, String>{
   'go_to_path_hint': '绝对路径，例如 /var/log。`~` 不会被展开。',
   'download': '下载',
   'chmod': '修改权限',
+  'chmod_invalid': '请输入三位八进制数，例如 755',
+  'permissions_changed': '权限已修改',
   'new_file': '新建',
   'upload': '本地文件上传',
   'modules': '模块',

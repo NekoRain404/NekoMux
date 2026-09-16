@@ -94,6 +94,8 @@ const Map<String, String> esStrings = <String, String>{
   'go_to_path_hint': 'Ruta absoluta, p. ej. /var/log. `~` no se expande.',
   'download': 'Descargar',
   'chmod': 'CHMOD',
+  'chmod_invalid': 'Introduce tres dígitos octales, p. ej. 755',
+  'permissions_changed': 'Permisos cambiados',
   'new_file': 'Nuevo',
   'upload': 'Subir archivo',
   'modules': 'Módulos',

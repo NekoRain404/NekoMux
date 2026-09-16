@@ -94,6 +94,8 @@ const Map<String, String> frStrings = <String, String>{
   'go_to_path_hint': 'Chemin absolu, par ex. /var/log. `~` n\'est pas développé.',
   'download': 'Télécharger',
   'chmod': 'CHMOD',
+  'chmod_invalid': 'Entrez trois chiffres octaux, par ex. 755',
+  'permissions_changed': 'Permissions modifiées',
   'new_file': 'Nouveau',
   'upload': 'Téléverser un fichier',
   'modules': 'Modules',

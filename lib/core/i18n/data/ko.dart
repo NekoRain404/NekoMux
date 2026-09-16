@@ -92,6 +92,8 @@ const Map<String, String> koStrings = <String, String>{
   'go_to_path_hint': '절대 경로 예: /var/log. `~`는 확장되지 않습니다.',
   'download': '다운로드',
   'chmod': '권한 변경',
+  'chmod_invalid': '8진수 3자리를 입력하세요 (예: 755)',
+  'permissions_changed': '권한이 변경되었습니다',
   'new_file': '새로 만들기',
   'upload': '파일 업로드',
   'modules': '모듈',

@@ -241,6 +241,9 @@ enum SftpFileAction {
   /// 重命名或移动。
   rename,
 
+  /// Change its permission bits.
+  changePermissions,
+
   /// Start selecting it for a batch action.
   /// 选中它以执行批量操作。
   select,
@@ -360,6 +363,16 @@ Future<SftpFileAction?> showSftpFileActions(
               label: t('rename'),
               color: cs.primary,
               onTap: () => Navigator.pop(ctx, SftpFileAction.rename),
+            ),
+            // Offered for directories as well as files: a directory's mode is
+            // what decides who may write into it, which is at least as common
+            // a thing to need as a file's.
+            _ActionTile(
+              icon: Icons.lock_outline,
+              label: t('chmod'),
+              color: cs.primary,
+              onTap: () =>
+                  Navigator.pop(ctx, SftpFileAction.changePermissions),
             ),
             _ActionTile(
               icon: Icons.check_box_outlined,

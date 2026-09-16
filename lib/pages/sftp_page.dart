@@ -23,6 +23,7 @@ import 'sftp/sftp_file_list.dart';
 import 'sftp/sftp_file_open.dart';
 import 'sftp/sftp_path.dart';
 import 'sftp/sftp_path_entry.dart';
+import 'sftp/sftp_permissions.dart';
 import 'sftp/sftp_remote_writes.dart';
 import 'sftp/sftp_status_view.dart';
 import 'transfer/transfer_actions.dart';
@@ -400,6 +401,8 @@ class _SftpPageState extends ConsumerState<SftpPage> {
         _queueDownload(file);
       case SftpFileAction.rename:
         await _showRenameDialog(file);
+      case SftpFileAction.changePermissions:
+        await _showPermissionsDialog(file);
       case SftpFileAction.select:
         setState(() => _selection.begin(file.path));
       case SftpFileAction.delete:
@@ -589,6 +592,33 @@ class _SftpPageState extends ConsumerState<SftpPage> {
     );
     if (!mounted) return;
     await _loadDirectory(_currentDir);
+  }
+
+  /// Asks for a new permission mode and applies it.
+  ///
+  /// `setPermissions` preserves the file-type bits (see the service), so this
+  /// changes who may read, write and execute the entry without turning a
+  /// directory into a file — the mistake a bare `chmod`-style write would make
+  /// against a mode that also carries the type.
+  Future<void> _showPermissionsDialog(FileItem file) async {
+    final service = _sftpService;
+    if (service == null) return;
+
+    final mode = await showSftpChmodDialog(
+      context,
+      name: file.name,
+      current: file.permissions,
+    );
+    if (mode == null || !mounted) return;
+
+    try {
+      await service.setPermissions(file.path, mode);
+      if (!mounted) return;
+      await _loadDirectory(_currentDir);
+      if (mounted) _showSnack(t('permissions_changed'));
+    } on SftpException catch (e) {
+      if (mounted) _showSnack(sftpErrorText(e), isError: true);
+    }
   }
 
   /// Deletes one entry after confirming.

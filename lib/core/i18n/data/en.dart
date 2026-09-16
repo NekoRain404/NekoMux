@@ -94,6 +94,8 @@ const Map<String, String> enStrings = <String, String>{
   'go_to_path_hint': 'Absolute path, e.g. /var/log. `~` is not expanded.',
   'download': 'Download',
   'chmod': 'CHMOD',
+  'chmod_invalid': 'Enter three octal digits, e.g. 755',
+  'permissions_changed': 'Permissions changed',
   'new_file': 'New',
   'upload': 'Upload File',
   'modules': 'Modules',

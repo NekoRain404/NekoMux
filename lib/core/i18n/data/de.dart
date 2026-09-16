@@ -94,6 +94,8 @@ const Map<String, String> deStrings = <String, String>{
   'go_to_path_hint': 'Absoluter Pfad, z. B. /var/log. `~` wird nicht ersetzt.',
   'download': 'Herunterladen',
   'chmod': 'CHMOD',
+  'chmod_invalid': 'Drei Oktalziffern eingeben, z. B. 755',
+  'permissions_changed': 'Berechtigungen geändert',
   'new_file': 'Neu',
   'upload': 'Datei hochladen',
   'modules': 'Module',
