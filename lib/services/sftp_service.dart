@@ -6,6 +6,7 @@ import '../models/credential.dart';
 import '../models/file_item.dart';
 import 'host_key_verifier.dart';
 import 'sftp_failure.dart';
+import 'sftp_format.dart';
 import 'sftp_guards.dart';
 import 'ssh_service.dart';
 
@@ -78,9 +79,23 @@ class SftpService {
   static const Duration defaultConnectTimeout =
       SshConnection.defaultConnectTimeout;
 
+  /// Keep-alive interval applied when a caller does not pass one.
+  ///
+  /// [SshConnection]'s own fallback rather than a second copy of the number, so
+  /// the two connection paths cannot drift apart; why an idle session needs one
+  /// at all is documented there.
+  static const Duration defaultKeepAliveInterval =
+      SshConnection.defaultKeepAliveInterval;
+
   /// Timeout for establishing the TCP/SSH session.
   /// 建立 TCP/SSH 会话的超时时间。
   final Duration connectTimeout;
+
+  /// How long the session may stay silent before the client pings the server. A
+  /// transfer is what needs it most: an upload the server has stopped
+  /// acknowledging sends nothing at all, so nothing in the transport notices that
+  /// the flow is gone.
+  final Duration keepAliveInterval;
 
   /// How long a streaming transfer may go without moving a byte before it is
   /// failed.
@@ -101,6 +116,7 @@ class SftpService {
     required this.host,
     required this.credential,
     this.connectTimeout = defaultConnectTimeout,
+    this.keepAliveInterval = defaultKeepAliveInterval,
     this.stallTimeout = defaultTransferStallTimeout,
     this.onHostKeyVerify,
   });
@@ -151,6 +167,9 @@ class SftpService {
       client = SSHClient(
         socket,
         username: credential.username,
+        // Passed explicitly rather than left to dartssh2's own default, so this
+        // path and the terminal ping on the same number.
+        keepAliveInterval: keepAliveInterval,
         onPasswordRequest: credential.authType == 0
             ? () => credential.secretData
             : null,
@@ -217,29 +236,19 @@ class SftpService {
       }
       await _cleanup();
       final detail = e.toString();
-      throw SftpException(_classifyConnectFailure(detail), detail);
+      throw SftpException(classifySftpConnectFailure(detail), detail);
     }
   }
 
   /// List directory contents at [path].
   /// 列出 [path] 路径下的目录内容。
   ///
-  /// Sorted: directories first, then files; each group alphabetically.
-  /// 排序规则：目录在前，文件在后；各自按字母排序。
+  /// Sorted: directories first, then files; each group alphabetically. Turning a
+  /// listing into those rows is [listingItems]' job, not this method's.
   Future<List<FileItem>> listDirectory(String path) async {
     _ensureConnected();
     try {
-      final entries = await _sftp!.listdir(path);
-      final items = entries
-          .where((e) => e.filename != '.' && e.filename != '..')
-          .map((e) => _toFileItem(e, path))
-          .toList();
-      items.sort((a, b) {
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
-        return a.name.compareTo(b.name);
-      });
-      return items;
+      return listingItems(await _sftp!.listdir(path), path);
     } catch (e) {
       throw SftpException(SftpFailure.list, e.toString());
     }
@@ -397,7 +406,7 @@ class SftpService {
         final next = reader.moveNext();
         if (!await watch.race(next)) {
           stalled = true;
-          throw SftpException(SftpFailure.read, _stallDetail());
+          throw SftpException(SftpFailure.read, stallDetailText(stallTimeout));
         }
         // Already complete, so awaiting it again costs nothing.
         // 已经完成，再等一次不花代价。
@@ -539,7 +548,10 @@ class SftpService {
           // 沉默：上报之前先停止供数，好让调用方交过来的数据源被释放，而不是永远停着。
           stalled = true;
           write.abort();
-          throw SftpException(SftpFailure.write, _stallDetail(write.rejected));
+          throw SftpException(
+            SftpFailure.write,
+            stallDetailText(stallTimeout, write.rejected),
+          );
         }
       } finally {
         watch.stop();
@@ -601,6 +613,56 @@ class SftpService {
     }
   }
 
+
+  /// Whether [path] exists on the server: a missing entry answers false, while
+  /// every other refusal still throws — see [isMissingFileError] for why only one
+  /// status code may collapse to false this way.
+  Future<bool> exists(String path) async {
+    _ensureConnected();
+    try {
+      await _sftp!.stat(path);
+      return true;
+    } catch (e) {
+      if (isMissingFileError(e)) return false;
+      throw SftpException(SftpFailure.read, e.toString());
+    }
+  }
+
+  /// Replace the permission bits of [path], keeping the file-type bits the server
+  /// reported for it: those bits exist only in the server's answer, so the path is
+  /// stat-ed first.
+  ///
+  /// [permissions] is an octal-style mask (0o644), not a whole mode — see
+  /// [mergePermissionBits]. Failures are reported as [SftpFailure.write] rather
+  /// than as a code of their own, which would grow every exhaustive switch over
+  /// [SftpFailure] and every i18n table for a failure no user acts on differently.
+  Future<void> setPermissions(String path, int permissions) async {
+    _ensureConnected();
+    try {
+      final attrs = await _sftp!.stat(path);
+      final mode = mergePermissionBits(attrs.mode?.value, permissions);
+      await _sftp!.setStat(path, SftpFileAttrs(mode: SftpFileMode.value(mode)));
+    } catch (e) {
+      throw SftpException(SftpFailure.write, e.toString());
+    }
+  }
+
+  /// The server's own absolute form of [path]: `.` and `..` resolved, a relative
+  /// name anchored to the session's working directory.
+  ///
+  /// The server's own view rather than a local guess, which is the point: only
+  /// the server knows what its symlinks mean. It does **not** expand `~` — that
+  /// is a shell habit, not a filesystem one, and a server asked to resolve it will
+  /// look for a directory literally named `~`.
+  Future<String> resolvePath(String path) async {
+    _ensureConnected();
+    try {
+      return await _sftp!.absolute(path);
+    } catch (e) {
+      throw SftpException(SftpFailure.read, e.toString());
+    }
+  }
+
   /// Gracefully close the SFTP session and underlying SSH connection.
   /// 优雅地关闭 SFTP 会话和底层 SSH 连接。
   ///
@@ -625,23 +687,6 @@ class SftpService {
       throw const SftpException(SftpFailure.notConnected);
     }
   }
-
-  /// The technical detail to report for a transfer that stopped moving bytes.
-  /// 为一次停止移动字节的传输上报的技术细节。
-  ///
-  /// [cause] — what dartssh2's own listener reported, when anything did — wins,
-  /// because it is the server's own complaint and the convention here is that
-  /// [SftpException.detail] is the underlying error's rendering and never a
-  /// sentence this app wrote. The fallback is the only thing left to say when
-  /// there is no such error, which is the case for a connection that has gone
-  /// away entirely: a number, not a translation.
-  /// 有内容时以 [cause]——dartssh2 自己的监听器所报告的东西——为准，因为那是服务器自己
-  /// 的抱怨，而这里的约定是：[SftpException.detail] 是底层错误自身的呈现，绝不是本应用
-  /// 写下的句子。完全没有这种错误时（例如连接整个消失）才使用兜底值：它是一个数字，
-  /// 不是一句译文。
-  String _stallDetail([Object? cause]) => cause != null
-      ? cause.toString()
-      : 'no progress for ${stallTimeout.inMilliseconds}ms';
 
   /// Whether the connect attempt identified by [epoch] was invalidated by a
   /// [disconnect] that landed while it was suspended on an `await`.
@@ -717,59 +762,5 @@ class SftpService {
     }
     _sftp = null;
     _client = null;
-  }
-
-  /// Convert an [SftpName] entry to a [FileItem] for the UI.
-  /// 将 [SftpName] 条目转换为供 UI 使用的 [FileItem]。
-  FileItem _toFileItem(SftpName entry, String parentPath) {
-    final a = entry.attr;
-    final fullPath = parentPath.endsWith('/')
-        ? '$parentPath${entry.filename}'
-        : '$parentPath/${entry.filename}';
-
-    return FileItem(
-      name: entry.filename,
-      path: fullPath,
-      isDirectory: a.isDirectory,
-      size: a.size ?? 0,
-      permissions: _formatMode(a.mode),
-      modifiedDate: a.modifyTime != null
-          ? DateTime.fromMillisecondsSinceEpoch(a.modifyTime! * 1000)
-          : DateTime.now(),
-    );
-  }
-
-  /// Format an [SftpFileMode] into a Unix-like permission string (e.g. "rwxr-xr--").
-  /// 将 [SftpFileMode] 格式化为类 Unix 权限字符串（如 "rwxr-xr--"）。
-  String _formatMode(SftpFileMode? mode) {
-    if (mode == null) return '---------';
-    return '${mode.userRead ? 'r' : '-'}${mode.userWrite ? 'w' : '-'}${mode.userExecute ? 'x' : '-'}'
-        '${mode.groupRead ? 'r' : '-'}${mode.groupWrite ? 'w' : '-'}${mode.groupExecute ? 'x' : '-'}'
-        '${mode.otherRead ? 'r' : '-'}${mode.otherWrite ? 'w' : '-'}${mode.otherExecute ? 'x' : '-'}';
-  }
-
-  /// Classify a raw connect failure into a code the presentation layer can turn
-  /// into a sentence in the user's own language.
-  /// 将原始连接失败归类为展示层可据此生成用户语言句子的编码。
-  ///
-  /// Reading a transport error is protocol knowledge and stays here; wording it
-  /// is not, and moved to the i18n table. The predicates and their order are the
-  /// ones the message-based translation used, so which code a given failure
-  /// yields is unchanged — only the words are.
-  /// 解读传输层错误属于协议知识，留在这里；措辞不属于，已移到 i18n 表。判断条件及其
-  /// 顺序与基于消息的翻译完全一致，因此某种失败得到哪个编码保持不变——变的只是文字。
-  SftpFailure _classifyConnectFailure(String error) {
-    final lower = error.toLowerCase();
-    if (lower.contains('timeout')) return SftpFailure.connTimeout;
-    if (lower.contains('auth') ||
-        lower.contains('password') ||
-        lower.contains('key')) {
-      return SftpFailure.authFailed;
-    }
-    if (lower.contains('refused')) return SftpFailure.connRefused;
-    if (lower.contains('resolve') || lower.contains('unknown host')) {
-      return SftpFailure.hostUnreachable;
-    }
-    return SftpFailure.connect;
   }
 }

@@ -248,9 +248,33 @@ class SshConnection {
   /// 原因。
   static const Duration defaultConnectTimeout = Duration(seconds: 10);
 
+  /// How long a session may stay silent before the client pings the server.
+  ///
+  /// A phone is not a server: the screen sleeps, the radio hands the connection
+  /// to another cell, and a carrier NAT drops a mapping nothing has crossed for a
+  /// while. None of that closes the socket — the connection is simply gone — and
+  /// an idle terminal or a transfer the server has stopped acknowledging then
+  /// waits on that dead flow forever, because nothing is being sent that could
+  /// come back as an error. A ping every [defaultKeepAliveInterval] keeps the
+  /// mapping alive and turns a dead flow into a failure the user can see.
+  ///
+  /// 30s sits below the idle timeouts carrier NATs are built with and far above
+  /// the cost of one small packet, so on an otherwise silent link this is the only
+  /// traffic there is; dartssh2's own default (10s) is not relied on, so the
+  /// number has one definition this app can point at.
+  static const Duration defaultKeepAliveInterval = Duration(seconds: 30);
+
   /// Timeout for establishing the TCP/SSH session.
   /// 建立 TCP/SSH 会话的超时时间。
   final Duration connectTimeout;
+
+  /// How long the session may stay silent before the client pings the server.
+  ///
+  /// A parameter rather than a bare constant for the same reason as
+  /// [connectTimeout]: a caller that has to state it explicitly references
+  /// [defaultKeepAliveInterval] rather than re-typing `30`, which is how the two
+  /// could otherwise drift apart.
+  final Duration keepAliveInterval;
 
   /// Creates a new SSH connection for the given [host] and [credential].
   /// 使用给定的 [host] 和 [credential] 创建新的 SSH 连接。
@@ -260,6 +284,7 @@ class SshConnection {
     this.onHostKeyVerify,
     this.onHostKeyVerifyTyped,
     this.connectTimeout = defaultConnectTimeout,
+    this.keepAliveInterval = defaultKeepAliveInterval,
   });
 
   /// The verification callback to hand to dartssh2, derived from whichever of
@@ -390,6 +415,11 @@ class SshConnection {
       final client = SSHClient(
         socket,
         username: credential.username,
+
+        /// Passed explicitly rather than left to dartssh2's own 10s default, so
+        /// the console and the file manager keep their sessions alive on the same
+        /// number — see [defaultKeepAliveInterval].
+        keepAliveInterval: keepAliveInterval,
         onPasswordRequest: credential.authType == 0
             ? () => credential.secretData
             : null,
