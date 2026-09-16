@@ -296,6 +296,7 @@ const Map<String, String> jaStrings = <String, String>{
   // ---- Settings page strings ----
   'settings_title': '設定 / Settings',
   'load_failed_msg': '読み込み失敗: {0}',
+  'setting_save_failed': '設定を保存できませんでした: {0}',
   'terminal_font_size': 'ターミナルフォント',
   'terminal_font_sub': 'Terminal Font Size',
   'conn_timeout_label': '接続タイムアウト',

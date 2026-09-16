@@ -311,6 +311,7 @@ const Map<String, String> deStrings = <String, String>{
   // ---- Settings page strings ----
   'settings_title': 'Einstellungen / Settings',
   'load_failed_msg': 'Laden fehlgeschlagen: {0}',
+  'setting_save_failed': 'Einstellung konnte nicht gespeichert werden: {0}',
   'terminal_font_size': 'Terminal-Schriftgröße',
   'terminal_font_sub': 'Terminal Font Size',
   'conn_timeout_label': 'Verbindungs-Timeout',

@@ -52,56 +52,64 @@ class SettingsThemePicker extends ConsumerWidget {
               itemBuilder: (_, i) {
                 final preset = presets[i];
                 final selected = preset.id == currentId;
-                return GestureDetector(
-                  onTap: () =>
-                      ref.read(themeIdProvider.notifier).set(preset.id),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    width: 100,
-                    decoration: BoxDecoration(
-                      color: preset.card,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: selected
-                            ? Theme.of(context).colorScheme.primary
-                            : preset.border,
-                        width: selected ? 2 : 1,
+                // InkWell inside a Material rather than a bare GestureDetector:
+                // a theme card is a button, and a button that gives nothing back
+                // under a finger — no ripple, no highlight — reads as inert even
+                // when the theme behind it has just changed.
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () =>
+                        ref.read(themeIdProvider.notifier).set(preset.id),
+                    borderRadius: BorderRadius.circular(8),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      width: 100,
+                      decoration: BoxDecoration(
+                        color: preset.card,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: selected
+                              ? Theme.of(context).colorScheme.primary
+                              : preset.border,
+                          width: selected ? 2 : 1,
+                        ),
                       ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _ColorDot(color: preset.accent),
-                            const SizedBox(width: 4),
-                            _ColorDot(color: preset.accent2),
-                            const SizedBox(width: 4),
-                            _ColorDot(color: preset.danger),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          // The preset's id doubles as the translation key
-                          // suffix, so the name is shown in the user's language.
-                          // `AppThemeDef` also carries `nameZh`/`nameEn`, but
-                          // only the Chinese one was ever rendered — the other
-                          // six of the eight shipped languages had no way to be
-                          // named, and `nameEn` was dead code.
-                          // 预设的 id 同时用作翻译键的后缀，因此主题名会按用户语言显示。
-                          // `AppThemeDef` 还带着 `nameZh`/`nameEn`，但此前只渲染过中文那
-                          // 一个——已支持的八种语言里有六种无从命名，而 `nameEn` 是死代码。
-                          t('theme_${preset.id}'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: preset.text1,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _ColorDot(color: preset.accent),
+                              const SizedBox(width: 4),
+                              _ColorDot(color: preset.accent2),
+                              const SizedBox(width: 4),
+                              _ColorDot(color: preset.danger),
+                            ],
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          Text(
+                            // The preset's id doubles as the translation key
+                            // suffix, so the name is shown in the user's language.
+                            // `AppThemeDef` also carries `nameZh`/`nameEn`, but
+                            // only the Chinese one was ever rendered — the other
+                            // six of the eight shipped languages had no way to be
+                            // named, and `nameEn` was dead code.
+                            // 预设的 id 同时用作翻译键的后缀，因此主题名会按用户语言显示。
+                            // `AppThemeDef` 还带着 `nameZh`/`nameEn`，但此前只渲染过中文那
+                            // 一个——已支持的八种语言里有六种无从命名，而 `nameEn` 是死代码。
+                            t('theme_${preset.id}'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: preset.text1,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );

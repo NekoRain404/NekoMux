@@ -296,6 +296,7 @@ const Map<String, String> koStrings = <String, String>{
   // ---- Settings page strings ----
   'settings_title': '설정 / Settings',
   'load_failed_msg': '로드 실패: {0}',
+  'setting_save_failed': '설정을 저장하지 못했습니다: {0}',
   'terminal_font_size': '터미널 글꼴',
   'terminal_font_sub': 'Terminal Font Size',
   'conn_timeout_label': '연결 시간 초과',

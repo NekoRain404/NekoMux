@@ -78,14 +78,35 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       body: async.when(
         loading: () =>
             Center(child: CircularProgressIndicator(color: cs.primary)),
-        error: (e, _) => SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Center(
-            child: Text(
-              t('load_failed_msg').replaceAll('{0}', e.toString()),
-              maxLines: 6,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.62)),
+        // A retry, like every other table-backed screen in the app. Settings
+        // had a dead end: a read that failed left the user with a message and
+        // nothing to press, on the one screen whose rows are the app's own
+        // preferences — including the connection timeout they might have set
+        // because the network is slow, which is often the same network that
+        // just failed this read.
+        error: (e, _) => Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  t('load_failed_msg').replaceAll('{0}', e.toString()),
+                  textAlign: TextAlign.center,
+                  maxLines: 6,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.62)),
+                ),
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  onPressed: () => ref.invalidate(settingsProvider),
+                  icon: Icon(Icons.refresh, color: cs.secondary, size: 18),
+                  label: Text(
+                    t('retry'),
+                    style: TextStyle(color: cs.secondary),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -217,8 +238,32 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
-  void _update(AppSettings s) =>
-      ref.read(settingsProvider.notifier).updateSettings(s);
+  /// Persists [s], confirms it, and reports a write that failed.
+  ///
+  /// The future used to be discarded, which made a failed write invisible: the
+  /// row had already moved to its new position (the tiles render from the value
+  /// the user just chose) while `tb_settings` still held the old one, so the
+  /// screen and the database disagreed until the next restart silently reverted
+  /// it — the exact shape of a preference that "does not stick".
+  ///
+  /// The haptic fires from the *new* value, not the stored one: the toggle that
+  /// turns haptics on is the one case where the old setting cannot confirm
+  /// itself, so enabling it would otherwise stay silent until the next change.
+  Future<void> _update(AppSettings s) async {
+    hapticIf(s.hapticEnabled, HapticKind.light);
+    try {
+      await ref.read(settingsProvider.notifier).updateSettings(s);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(t('setting_save_failed').replaceAll('{0}', '$e')),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
+  }
 
   /// Opens the list of host keys the app has accepted.
   /// 打开应用已接受的主机密钥列表。

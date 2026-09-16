@@ -311,6 +311,7 @@ const Map<String, String> frStrings = <String, String>{
   // ---- Settings page strings ----
   'settings_title': 'Paramètres / Settings',
   'load_failed_msg': 'Échec du chargement: {0}',
+  'setting_save_failed': 'Impossible d\'enregistrer le réglage : {0}',
   'terminal_font_size': 'Police du terminal',
   'terminal_font_sub': 'Terminal Font Size',
   'conn_timeout_label': 'Délai de connexion',

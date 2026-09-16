@@ -8,6 +8,7 @@
 // 而页面是唯一持有 SSH 连接的地方。
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme/app_fonts.dart';
 import '../../core/haptics.dart';
@@ -82,14 +83,47 @@ void showContainerActionSheet(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                container.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppFonts.monoText(
-                  color: cs.onSurface,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+              // Tapping the name copies it. The container name is what every
+              // other tool needs — `docker exec -it <name> sh` on a laptop, a
+              // compose file, a bug report — and it is a mono-spaced string
+              // designed to be reproduced exactly, which is the worst thing to
+              // retype from a phone.
+              InkWell(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: container.name));
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text(t('copied'))));
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          container.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFonts.monoText(
+                            color: cs.onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.copy,
+                        size: 14,
+                        color: cs.onSurface.withValues(alpha: 0.4),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 4),

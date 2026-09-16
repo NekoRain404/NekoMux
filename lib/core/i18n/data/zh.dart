@@ -294,6 +294,7 @@ const Map<String, String> zhStrings = <String, String>{
   // ---- Settings page strings ----
   'settings_title': '设置 / Settings',
   'load_failed_msg': '加载失败: {0}',
+  'setting_save_failed': '设置保存失败：{0}',
   'terminal_font_size': '终端字体',
   'terminal_font_sub': 'Terminal Font Size',
   'conn_timeout_label': '连接超时',

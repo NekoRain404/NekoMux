@@ -309,6 +309,7 @@ const Map<String, String> ruStrings = <String, String>{
   // ---- Settings page strings ----
   'settings_title': 'Настройки / Settings',
   'load_failed_msg': 'Ошибка загрузки: {0}',
+  'setting_save_failed': 'Не удалось сохранить настройку: {0}',
   'terminal_font_size': 'Шрифт терминала',
   'terminal_font_sub': 'Terminal Font Size',
   'conn_timeout_label': 'Тайм-аут соединения',

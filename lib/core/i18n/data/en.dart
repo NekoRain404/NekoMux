@@ -307,6 +307,7 @@ const Map<String, String> enStrings = <String, String>{
   // ---- Settings page strings ----
   'settings_title': 'Settings',
   'load_failed_msg': 'Load failed: {0}',
+  'setting_save_failed': 'Could not save the setting: {0}',
   'terminal_font_size': 'Terminal Font Size',
   'terminal_font_sub': 'Terminal Font Size',
   'conn_timeout_label': 'Connection Timeout',
