@@ -52,6 +52,15 @@ class Host {
   /// 外键，引用关联的凭证记录。
   final String credentialId;
 
+  /// Another host to reach this one THROUGH (a bastion / jump host), or null
+  /// when this host is dialled directly.
+  ///
+  /// An id rather than an address and credential of its own: the bastion is a
+  /// host the user has already configured, with its own credential and its own
+  /// entry in the known-hosts table. Embedding a second address here would mean
+  /// a second place to keep a password and a second key nobody trusts.
+  final String? jumpHostId;
+
   /// Denormalized credential display name (for UI convenience).
   /// 反规范化的凭证显示名称（便于 UI 使用）。
   String? credentialName;
@@ -133,6 +142,7 @@ class Host {
     this.credentialUsername,
     this.osType = 0,
     this.groupName,
+    this.jumpHostId,
     HostStatus status = HostStatus.unverified,
     bool? isOnline,
   }) : status = isOnline == null
@@ -209,6 +219,8 @@ class Host {
     String? credentialUsername,
     int? osType,
     String? groupName,
+    String? jumpHostId,
+    bool clearJumpHost = false,
     HostStatus? status,
   }) {
     return Host(
@@ -221,6 +233,9 @@ class Host {
       credentialUsername: credentialUsername ?? this.credentialUsername,
       osType: osType ?? this.osType,
       groupName: groupName ?? this.groupName,
+      // `??` cannot express "set this back to null", and clearing a jump host is
+      // exactly that — the form's "direct connection" option. Hence the flag.
+      jumpHostId: clearJumpHost ? null : (jumpHostId ?? this.jumpHostId),
       status: status ?? this.status,
     );
   }
@@ -238,6 +253,7 @@ class Host {
     'credential_id': credentialId,
     'os_type': osType,
     'group_name': groupName,
+    'jump_host_id': jumpHostId,
   };
 
   /// Deserializes a host from a database row map.
@@ -261,6 +277,10 @@ class Host {
     credentialId: map['credential_id'] as String,
     osType: map['os_type'] as int,
     groupName: normalizeGroupName(map['group_name']),
+    // Read defensively, like `group_name`: a row that predates the v5 migration
+    // arrives without it, and a host that cannot be parsed is a host the user
+    // cannot see. A non-string or a blank value means "dialled directly".
+    jumpHostId: normalizeJumpHostId(map['jump_host_id']),
   );
 
   /// Normalizes a stored or typed group name to the one shape the rest of the
@@ -271,6 +291,14 @@ class Host {
   /// Kept here, next to the field, so the database read, the form's save and the
   /// dirty check cannot each invent their own idea of what "blank" means.
   /// 放在字段旁边，使数据库读取、表单保存与脏检查不会各自发明一套「留空」的定义。
+  /// Normalizes a stored or chosen jump-host id to the one shape the rest of the
+  /// app compares against: a non-blank string, or `null` for "direct".
+  static String? normalizeJumpHostId(Object? raw) {
+    if (raw is! String) return null;
+    final trimmed = raw.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
   static String? normalizeGroupName(Object? raw) {
     if (raw is! String) return null;
     final trimmed = raw.trim();

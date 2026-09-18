@@ -2,11 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/credential.dart';
 import '../models/host.dart';
-import '../services/host_key_trust.dart';
+import '../services/host_connection.dart';
 import '../services/known_hosts_store.dart';
 import '../services/port_forward_service.dart';
 import '../services/ssh_service.dart';
 import 'providers.dart';
+import 'ssh_provider.dart';
 
 /// One host's tunnels, with the session that carries them.
 class HostTunnels {
@@ -66,18 +67,20 @@ class TunnelNotifier extends Notifier<Map<String, HostTunnels>> {
 
     _update(host.id, const HostTunnels(connecting: true));
     final db = await ref.read(databaseProvider.future);
-    final session = SshConnection(
+    final hosts = ref.read(hostListProvider).value ?? const <Host>[];
+    final credentials = await ref.read(credentialListProvider.future);
+    final session = buildHostConnection(
       host: host,
       credential: credential,
-      keepAliveInterval: SshConnection.defaultKeepAliveInterval,
-      onHostKeyVerify: buildHostKeyVerifier(
-        db: db,
-        address: host.ipAddress,
-        port: host.port,
-        onPrompt: onPrompt,
-      ),
+      db: db,
+      // The tunnel session is the one that must survive idleness: a forward
+      // carries nothing until someone connects to it, so a carrier NAT would
+      // drop it long before the user notices. The factory keeps the app's own
+      // keepalive interval.
+      connectTimeout: ref.read(connectTimeoutProvider),
+      jump: jumpRouteFor(host, hosts: hosts, credentials: credentials),
+      onPrompt: onPrompt,
     );
-
     try {
       await session.connect();
     } catch (e) {

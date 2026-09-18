@@ -6,6 +6,8 @@ import '../models/credential.dart';
 import '../models/file_item.dart';
 import 'host_key_verifier.dart';
 import 'sftp_failure.dart';
+import 'sftp_file_io.dart';
+import 'sftp_queries.dart';
 import 'sftp_format.dart';
 import 'sftp_liveness.dart';
 import 'sftp_tree.dart';
@@ -281,20 +283,7 @@ class SftpService implements SftpTreeOps {
   Future<Uint8List> readFile(String path) async {
     _ensureConnected();
     try {
-      final file = await _sftp!.open(path, mode: SftpFileOpenMode.read);
-      try {
-        final chunks = await file.read().toList();
-        final total = chunks.fold<int>(0, (s, c) => s + c.length);
-        final buf = Uint8List(total);
-        var offset = 0;
-        for (final chunk in chunks) {
-          buf.setRange(offset, offset + chunk.length, chunk);
-          offset += chunk.length;
-        }
-        return buf;
-      } finally {
-        await file.close();
-      }
+      return await readWholeFile(_sftp!, path);
     } catch (e) {
       throw SftpException(SftpFailure.read, e.toString());
     }
@@ -305,18 +294,7 @@ class SftpService implements SftpTreeOps {
   Future<void> writeFile(String path, Uint8List data) async {
     _ensureConnected();
     try {
-      final file = await _sftp!.open(
-        path,
-        mode:
-            SftpFileOpenMode.write |
-            SftpFileOpenMode.create |
-            SftpFileOpenMode.truncate,
-      );
-      try {
-        await file.writeBytes(data);
-      } finally {
-        await file.close();
-      }
+      await writeWholeFile(_sftp!, path, data);
     } catch (e) {
       throw SftpException(SftpFailure.write, e.toString());
     }
@@ -674,28 +652,19 @@ class SftpService implements SftpTreeOps {
   Future<bool> exists(String path) async {
     _ensureConnected();
     try {
-      await _sftp!.stat(path);
-      return true;
+      return await remotePathExists(_sftp!, path);
     } catch (e) {
       if (isMissingFileError(e)) return false;
       throw SftpException(SftpFailure.read, e.toString());
     }
   }
 
-  /// Replace the permission bits of [path], keeping the file-type bits the server
-  /// reported for it: those bits exist only in the server's answer, so the path is
-  /// stat-ed first.
-  ///
-  /// [permissions] is an octal-style mask (0o644), not a whole mode — see
-  /// [mergePermissionBits]. Failures are reported as [SftpFailure.write] rather
-  /// than as a code of their own, which would grow every exhaustive switch over
-  /// [SftpFailure] and every i18n table for a failure no user acts on differently.
+  /// Replace the permission bits of [path], keeping the file-type bits the
+  /// server reported for it. See [setWholeFilePermissions].
   Future<void> setPermissions(String path, int permissions) async {
     _ensureConnected();
     try {
-      final attrs = await _sftp!.stat(path);
-      final mode = mergePermissionBits(attrs.mode?.value, permissions);
-      await _sftp!.setStat(path, SftpFileAttrs(mode: SftpFileMode.value(mode)));
+      await setWholeFilePermissions(_sftp!, path, permissions);
     } catch (e) {
       throw SftpException(SftpFailure.write, e.toString());
     }
@@ -711,7 +680,7 @@ class SftpService implements SftpTreeOps {
   Future<String> resolvePath(String path) async {
     _ensureConnected();
     try {
-      return await _sftp!.absolute(path);
+      return await resolveRemotePath(_sftp!, path);
     } catch (e) {
       throw SftpException(SftpFailure.read, e.toString());
     }

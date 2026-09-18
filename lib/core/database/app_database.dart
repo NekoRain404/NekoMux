@@ -13,7 +13,7 @@ class AppDatabase {
   /// is a literal that can disagree with itself.
   /// 本构建期望的表结构版本。写成具名常量，因为升级路径靠与它比较来选取，而写在两处的
   /// 字面量是可能自相矛盾的字面量。
-  static const int schemaVersion = 4;
+  static const int schemaVersion = 5;
 
   Database? _db;
 
@@ -38,6 +38,10 @@ class AppDatabase {
   /// v1 schema: credentials, hosts, snippets, settings tables.
   /// v2 added `tb_settings` for installs that predated it.
   /// v3 adds `tb_known_hosts` so accepted host keys survive a restart.
+  /// v5 adds `tb_hosts.jump_host_id`, so a host can be reached through a bastion.
+  ///
+  /// v5 新增 `tb_hosts.jump_host_id`，使主机可以经由堡垒机访问。
+  ///
   /// v4 adds `tb_hosts.group_name` so hosts can be grouped by role or
   /// environment.
   /// v1 表结构：凭据表、主机表、快捷指令表、设置表。
@@ -69,6 +73,11 @@ class AppDatabase {
         credential_id TEXT NOT NULL,
         os_type INTEGER NOT NULL DEFAULT 0,
         group_name TEXT,
+        -- Another host to reach this one through, or NULL for a direct
+        -- connection. Deliberately not a foreign key: deleting the bastion
+        -- must not delete or block the hosts behind it, and a dangling id is
+        -- handled where it is used (the host simply dials directly and says so).
+        jump_host_id TEXT,
         FOREIGN KEY (credential_id) REFERENCES tb_credentials(id)
       )
     ''');
@@ -156,6 +165,14 @@ class AppDatabase {
     // 呈现为「未分组」——这正是对从未被分组过的主机最诚实的描述。
     if (oldVersion < 4) {
       await _addColumnIfMissing(db, table: 'tb_hosts', column: 'group_name');
+    }
+    // v5: `tb_hosts.jump_host_id`, for hosts reached through a bastion. Existing
+    // rows read NULL, which means "dialled directly" — true of every host that
+    // existed before this column did.
+    // v5：`tb_hosts.jump_host_id`，用于经堡垒机访问的主机。已有行读到 NULL，即「直连」
+    // ——这对本列出现之前的每一台主机都成立。
+    if (oldVersion < 5) {
+      await _addColumnIfMissing(db, table: 'tb_hosts', column: 'jump_host_id');
     }
   }
 

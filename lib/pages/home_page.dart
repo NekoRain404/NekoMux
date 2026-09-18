@@ -6,7 +6,7 @@ import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
 import '../providers/ssh_provider.dart';
-import '../services/host_key_trust.dart';
+import '../services/host_connection.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
@@ -222,35 +222,31 @@ class _HomePageState extends ConsumerState<HomePage> {
             // a machine-in-the-middle needs.
             // 探测同样是一次带真实凭据的完整 SSH 会话，必须和其它连接一样校验
             // 主机密钥：不传回调时 `dartssh2` 会接受任意密钥，这正是中间人想要的。
-            final conn = SshConnection(
+            // Built by the shared factory, which carries the bastion decision
+            // as well: a host reached through one is probed through it, and both
+            // hops are refused silently rather than prompted for. See below for
+            // why a background probe must never ask.
+            final conn = buildHostConnection(
               host: host,
               credential: credential,
+              db: db,
               connectTimeout: probeTimeout,
-              onHostKeyVerify: buildHostKeyVerifier(
-                db: db,
-                address: host.ipAddress,
-                port: host.port,
-                // `onPrompt` fires exactly when the presented key is not
-                // trusted yet (see host_key_trust.dart) — the case that used to
-                // raise a modal prompt from a background probe. It must not: a
-                // dialog the user never asked for, once per untrusted host on
-                // every launch, is one they learn to dismiss on reflex, and
-                // then the one prompt that carries real signal — "this host's
-                // key CHANGED" — is dismissed with the rest. Refusing silently
-                // keeps the trust decision where it belongs, in a connection
-                // the user asked for. Refusing stores nothing, so the host
-                // stays untrusted and later rounds re-refuse just as silently.
-                // `onPrompt` 恰在呈现的密钥尚未受信时触发（见 host_key_trust.dart）
-                // ——这正是过去会从后台探测弹出模态提示的情形。它绝不能这么做：
-                // 每次启动为每台未受信主机弹一个用户从未请求的对话框，只会让人条件
-                // 反射地关掉，而真正承载信号的那一次提示「此主机的密钥已变更」也会
-                // 被一并关掉。静默拒绝把信任决策留在它该在的地方——用户主动发起的
-                // 连接里。拒绝不写入任何记录，主机保持未受信，后续轮次同样静默重拒。
-                onPrompt: (_, _) async {
-                  trustRefused = true;
-                  return false;
-                },
+              jump: jumpRouteFor(
+                host,
+                hosts: hosts,
+                credentials: credentials,
               ),
+              refuseUntrusted: true,
+              onTrustRefused: () => trustRefused = true,
+              // Never called while [refuseUntrusted] is set; the factory
+              // replaces it with a silent refusal. `onPrompt` would otherwise
+              // fire exactly when the presented key is not trusted yet (see
+              // host_key_trust.dart), which is the case that used to raise a
+              // modal from a background probe: a dialog the user never asked
+              // for, once per untrusted host on every launch, is one they learn
+              // to dismiss on reflex — and then the one prompt that carries real
+              // signal, "this host's key CHANGED", is dismissed with the rest.
+              onPrompt: (_, _) async => false,
             );
             try {
               await conn.connect();

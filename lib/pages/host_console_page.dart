@@ -8,7 +8,7 @@ import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
 import '../providers/ssh_provider.dart';
-import '../services/host_key_trust.dart';
+import '../services/host_connection.dart';
 import '../services/known_hosts_store.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
@@ -283,50 +283,35 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
       // 无法把它和密码错误区分开——完整说明见 console/connect_outcome.dart。
       var trustRefused = false;
 
-      final conn = SshConnection(
+      // Built by the shared factory so this page cannot grow its own idea of how
+      // a connection is put together — in particular, whether it goes through a
+      // bastion. Both hops' keys are verified there.
+      final conn = buildHostConnection(
         host: host,
         credential: cred,
-        // Settings → connect timeout, honoured in full here — deliberately NOT
-        // clamped the way the home page's background probe clamps it. The two
-        // are opposites: the probe runs against every host, on every round, with
-        // nobody watching, whereas this page opens exactly one session that the
-        // user asked for by tapping the host. Clamping here would re-create the
-        // very defect being fixed — someone on a slow link sets 30s and is still
-        // cut off at 4 — and the cost of honouring it is paid once rather than
-        // per tick, because a connect happens only on open, on retry and on
-        // pull-to-refresh, all user-initiated; the poll timer never starts one.
-        // Once connected, the poll loop is bounded by its own per-command
-        // deadline ([_commandTimeout]), which is a separate budget and stays
-        // exactly as it was.
-        // 设置 → 连接超时，在这里被完整遵循——刻意**不**像主页后台探测那样钳制。两者
-        // 恰好相反：探测每轮对每台主机执行且无人注视，而本页只打开用户点击主机所请求
-        // 的那一条会话。在此钳制会重新造出正在修复的缺陷——慢链路上的用户设了 30 秒，
-        // 却依然在 4 秒被切断——而遵循它的代价只付一次，不按 tick 重复：连接只发生在
-        // 打开、重试与下拉刷新时，全部由用户发起，轮询定时器从不会触发它。连上之后，
-        // 轮询循环由其各自的单命令截止时间（[_commandTimeout]）约束，那是另一笔预算，
-        // 保持原样。
+        db: db,
         connectTimeout: ref.read(connectTimeoutProvider),
-        onHostKeyVerify: buildHostKeyVerifier(
-          db: db,
-          address: host.ipAddress,
-          port: host.port,
-          onPrompt: (fingerprint, verdict) async {
-            // Runs after several awaits, so the page may already be gone; with
-            // nobody left to ask, refusing is the only safe answer.
-            // 该回调在多次 await 之后执行，页面可能已经销毁；此时无人可问，拒绝是唯一安全答案。
-            if (!mounted) {
-              trustRefused = true;
-              return false;
-            }
-            final accepted = await showHostKeyPrompt(
-              context,
-              fingerprint: fingerprint,
-              verdict: verdict,
-            );
-            if (!accepted) trustRefused = true;
-            return accepted;
-          },
+        jump: jumpRouteFor(
+          host,
+          hosts: ref.read(hostListProvider).value ?? const [],
+          credentials: creds,
         ),
+        onTrustRefused: () => trustRefused = true,
+        onPrompt: (fingerprint, verdict) async {
+          // Runs after several awaits, so the page may already be gone; with
+          // nobody left to ask, refusing is the only safe answer.
+          if (!mounted) {
+            trustRefused = true;
+            return false;
+          }
+          final accepted = await showHostKeyPrompt(
+            context,
+            fingerprint: fingerprint,
+            verdict: verdict,
+          );
+          if (!accepted) trustRefused = true;
+          return accepted;
+        },
       );
       _monitorConn = conn;
       await conn.connect();

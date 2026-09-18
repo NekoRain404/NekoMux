@@ -67,7 +67,11 @@ void _expectNothingDestructive(List<String> statements) {
 
 void main() {
   group('migrate — v3 to v4 adds the host group column', () {
-    test('issues one ALTER TABLE ADD COLUMN and nothing else', () async {
+    test('issues one ALTER TABLE ADD COLUMN per column it needs', () async {
+      // A v3 database is two schema versions behind now, so it gains both
+      // columns — the group it was missing and the jump host that arrived with
+      // v5. What the assertion is really about is the *shape* of the work: one
+      // cheap ALTER per column, no table rewrite, nothing else.
       final db = _RecordingDb(
         existingColumns: const [
           'id',
@@ -81,9 +85,16 @@ void main() {
 
       await AppDatabase().migrate(db, 3, AppDatabase.schemaVersion);
 
-      expect(db.statements.length, 1);
-      expect(db.statements.single, contains('ALTER TABLE tb_hosts'));
-      expect(db.statements.single, contains('ADD COLUMN group_name TEXT'));
+      expect(db.statements, hasLength(2));
+      expect(db.statements.every((s) => s.contains('ALTER TABLE tb_hosts')), isTrue);
+      expect(
+        db.statements.join(' '),
+        contains('ADD COLUMN group_name TEXT'),
+      );
+      expect(
+        db.statements.join(' '),
+        contains('ADD COLUMN jump_host_id TEXT'),
+      );
       _expectNothingDestructive(db.statements);
     });
 
@@ -93,7 +104,9 @@ void main() {
       // user_version disagrees with its schema. Without the check those throw
       // "duplicate column name" from inside openDatabase and the app cannot open
       // its database at all: no host list, not even Settings to restore a backup.
-      final db = _RecordingDb(existingColumns: const ['id', 'group_name']);
+      final db = _RecordingDb(
+        existingColumns: const ['id', 'group_name', 'jump_host_id'],
+      );
 
       await AppDatabase().migrate(db, 3, AppDatabase.schemaVersion);
 
@@ -147,6 +160,52 @@ void main() {
     });
   });
 
+  group('migrate — v4 to v5 adds the jump host column', () {
+    test('one ALTER, and nothing else', () async {
+      // The step a database that already has `group_name` still needs.
+      final db = _RecordingDb(
+        existingColumns: const [
+          'id',
+          'alias',
+          'ip_address',
+          'port',
+          'credential_id',
+          'os_type',
+          'group_name',
+        ],
+      );
+
+      await AppDatabase().migrate(db, 4, AppDatabase.schemaVersion);
+
+      expect(db.statements, hasLength(1));
+      expect(db.statements.single, contains('ALTER TABLE tb_hosts'));
+      expect(db.statements.single, contains('ADD COLUMN jump_host_id TEXT'));
+      _expectNothingDestructive(db.statements);
+    });
+
+    test('is skipped when the column is already there', () async {
+      // A database restored between builds, or hand-edited, may already carry it
+      // — and running the ALTER anyway would throw and take the whole migration
+      // (and therefore the host list) with it.
+      final db = _RecordingDb(
+        existingColumns: const [
+          'id',
+          'alias',
+          'ip_address',
+          'port',
+          'credential_id',
+          'os_type',
+          'group_name',
+          'jump_host_id',
+        ],
+      );
+
+      await AppDatabase().migrate(db, 4, AppDatabase.schemaVersion);
+
+      expect(db.statements, isEmpty);
+    });
+  });
+
   group('the added column is the shape SQLite can add cheaply', () {
     test('nullable with no default', () async {
       // `ALTER TABLE ADD COLUMN` only avoids rewriting the table — and therefore
@@ -157,12 +216,25 @@ void main() {
       final db = _RecordingDb(existingColumns: const ['id']);
       await AppDatabase().migrate(db, 3, AppDatabase.schemaVersion);
 
-      final sql = db.statements.single.toUpperCase();
-      expect(sql, contains('GROUP_NAME TEXT'));
-      expect(sql, isNot(contains('NOT NULL')));
-      expect(sql, isNot(contains('DEFAULT')));
-      expect(sql, isNot(contains('UNIQUE')));
-      expect(sql, isNot(contains('PRIMARY KEY')));
+      // Every column this migration adds, not just the first one: the v5 column
+      // has to be the same cheap shape, for the same reason.
+      expect(db.statements, isNotEmpty);
+      for (final statement in db.statements) {
+        final sql = statement.toUpperCase();
+        expect(sql, contains('ADD COLUMN'));
+        expect(sql, isNot(contains('NOT NULL')));
+        expect(sql, isNot(contains('DEFAULT')));
+        expect(sql, isNot(contains('UNIQUE')));
+        expect(sql, isNot(contains('PRIMARY KEY')));
+      }
+      expect(
+        db.statements.join(' ').toUpperCase(),
+        contains('GROUP_NAME TEXT'),
+      );
+      expect(
+        db.statements.join(' ').toUpperCase(),
+        contains('JUMP_HOST_ID TEXT'),
+      );
     });
   });
 }

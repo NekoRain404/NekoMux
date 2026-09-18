@@ -32,6 +32,22 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
   /// 可选分组，让主机在首页按角色或环境归类。留空表示不分组——保存时经由模型自身的
   /// 规则归一化，因此表单与数据库不可能对「留空」有不同理解。
   late final TextEditingController _groupController;
+
+  /// The host this one is reached through, or null for a direct connection.
+  String? _jumpHostId;
+
+  /// Every host that could serve as this one's bastion: all of them but itself.
+  ///
+  /// A host cannot be reached through itself — `jumpRouteFor` refuses it — and
+  /// offering it here would be offering a choice that silently does nothing.
+  List<Host> get _jumpCandidates {
+    final all = ref.watch(hostListProvider).value ?? const <Host>[];
+    final selfId = widget.existingHost?.id;
+    return [
+      for (final host in all)
+        if (host.id != selfId) host,
+    ];
+  }
   late int _osType;
   String? _selectedCredentialId;
   bool _isTesting = false;
@@ -115,6 +131,7 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
     _groupController = TextEditingController(text: h?.groupName ?? '');
     _osType = h?.osType ?? 0;
     _selectedCredentialId = h?.credentialId;
+    _jumpHostId = h?.jumpHostId;
   }
 
   @override
@@ -281,6 +298,7 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
       credentialUsername: matched.username,
       osType: _osType,
       groupName: Host.normalizeGroupName(_groupController.text),
+      jumpHostId: _jumpHostId,
       isOnline: widget.existingHost?.isOnline ?? false,
     );
 
@@ -561,6 +579,16 @@ class _AddHostPageState extends ConsumerState<AddHostPage> {
                   ],
                 ),
               ],
+              const SizedBox(height: 16),
+              // Where the host is reachable from. The bastion is another host
+              // the user already configured, so this is a choice among them
+              // rather than a second address and password to keep here — and its
+              // key is verified separately from this host's.
+              _JumpHostPicker(
+                hosts: _jumpCandidates,
+                selectedId: _jumpHostId,
+                onChanged: (id) => setState(() => _jumpHostId = id),
+              ),
               const SizedBox(height: 24),
               _ActionBar(
                 isTesting: _isTesting,
@@ -693,6 +721,70 @@ class _ActionBar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+
+/// Chooses the bastion a host is reached through, or "direct".
+///
+/// A dropdown rather than a text field: the bastion is a host the user has
+/// already configured, and typing an address here would create a second place to
+/// keep a password and a second key nobody has been asked to trust.
+class _JumpHostPicker extends StatelessWidget {
+  final List<Host> hosts;
+  final String? selectedId;
+  final ValueChanged<String?> onChanged;
+
+  const _JumpHostPicker({
+    required this.hosts,
+    required this.selectedId,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // A selection that is no longer among the candidates — the bastion was
+    // deleted while this form was open — is shown as "direct" rather than as a
+    // blank row: the value that will be saved is what the row says.
+    final known = hosts.any((h) => h.id == selectedId);
+    return DropdownButtonFormField<String?>(
+      initialValue: known ? selectedId : null,
+      dropdownColor: cs.surface,
+      style: TextStyle(color: cs.onSurface),
+      decoration: InputDecoration(
+        labelText: t('host_jump_label'),
+        helperText: t('host_jump_hint'),
+        helperMaxLines: 3,
+        labelStyle: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+        filled: true,
+        fillColor: Theme.of(context).scaffoldBackgroundColor,
+        enabledBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: Theme.of(context).dividerColor),
+          borderRadius: const BorderRadius.all(Radius.circular(8)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: cs.secondary, width: 1.5),
+          borderRadius: const BorderRadius.all(Radius.circular(8)),
+        ),
+      ),
+      items: [
+        DropdownMenuItem<String?>(
+          value: null,
+          child: Text(t('host_jump_direct'), overflow: TextOverflow.ellipsis),
+        ),
+        for (final host in hosts)
+          DropdownMenuItem<String?>(
+            value: host.id,
+            child: Text(
+              '${host.alias} · ${host.displayAddress}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+      ],
+      onChanged: onChanged,
     );
   }
 }

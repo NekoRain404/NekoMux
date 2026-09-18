@@ -12,7 +12,7 @@ import '../models/snippet.dart';
 import '../providers/providers.dart';
 import '../providers/settings_provider.dart';
 import '../providers/ssh_provider.dart';
-import '../services/host_key_trust.dart';
+import '../services/host_connection.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
@@ -142,30 +142,29 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
       final db = await ref.read(databaseProvider.future);
       if (!_attemptIsCurrent(epoch)) return;
 
-      final connection = SshConnection(
+      // Built by the shared factory, which is also where the bastion decision
+      // lives: a host configured to be reached through one is reached through
+      // one here too, with both keys verified.
+      final connection = buildHostConnection(
         host: host,
         credential: cred,
-        // Settings → connect timeout. The terminal is the page a user opens and
-        // then waits on, so the number they chose applies here in full.
-        // 设置 → 连接超时。终端是用户打开后会一直等待的页面，因此用户选定的数字在此
-        // 完整生效。
+        db: db,
         connectTimeout: ref.read(connectTimeoutProvider),
-        onHostKeyVerify: buildHostKeyVerifier(
-          db: db,
-          address: host.ipAddress,
-          port: host.port,
-          onPrompt: (fingerprint, verdict) async {
-            // Runs after several awaits, so the page may already be gone; with
-            // nobody left to ask, refusing is the only safe answer.
-            // 该回调在多次 await 之后执行，页面可能已经销毁；此时无人可问，拒绝是唯一安全答案。
-            if (!mounted) return false;
-            return showHostKeyPrompt(
-              context,
-              fingerprint: fingerprint,
-              verdict: verdict,
-            );
-          },
+        jump: jumpRouteFor(
+          host,
+          hosts: ref.read(hostListProvider).value ?? const [],
+          credentials: creds,
         ),
+        onPrompt: (fingerprint, verdict) async {
+          // Runs after several awaits, so the page may already be gone; with
+          // nobody left to ask, refusing is the only safe answer.
+          if (!mounted) return false;
+          return showHostKeyPrompt(
+            context,
+            fingerprint: fingerprint,
+            verdict: verdict,
+          );
+        },
       );
 
       // The connection has just been built and nothing holds it yet. Starting

@@ -8,9 +8,11 @@ import '../models/credential.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
 import '../providers/ssh_provider.dart';
+import 'package:sqflite/sqflite.dart';
+
 import '../services/batch_runner.dart';
+import '../services/host_connection.dart';
 import '../services/command_result.dart';
-import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 
@@ -63,12 +65,18 @@ class _BatchExecPageState extends ConsumerState<BatchExecPage> {
   /// that it was asked — the same policy the background probe follows, with the
   /// difference that here the refusal is reported to the user per host instead
   /// of being silent.
-  BatchSessionFactory _sessionFactory(Duration connectTimeout, dynamic db) {
+  BatchSessionFactory _sessionFactory(
+    Duration connectTimeout,
+    Database db, {
+    required List<Host> hosts,
+    required List<Credential> credentials,
+  }) {
     return (host, credential) => _RealBatchSession(
       host: host,
       credential: credential,
       connectTimeout: connectTimeout,
       database: db,
+      jump: jumpRouteFor(host, hosts: hosts, credentials: credentials),
     );
   }
 
@@ -104,7 +112,12 @@ class _BatchExecPageState extends ConsumerState<BatchExecPage> {
     await runner.run(
       hosts: targets,
       command: command,
-      sessionFor: _sessionFactory(ref.read(connectTimeoutProvider), db),
+      sessionFor: _sessionFactory(
+        ref.read(connectTimeoutProvider),
+        db,
+        hosts: hosts,
+        credentials: credentials,
+      ),
       credentialFor: (host) => byId[host.credentialId],
     );
 
@@ -544,7 +557,10 @@ class _RealBatchSession implements BatchSession {
   final Host host;
   final Credential credential;
   final Duration connectTimeout;
-  final dynamic database;
+  final Database database;
+
+  /// The bastion this host is reached through, already resolved.
+  final JumpRoute? jump;
 
   SshConnection? _connection;
 
@@ -553,6 +569,7 @@ class _RealBatchSession implements BatchSession {
     required this.credential,
     required this.connectTimeout,
     required this.database,
+    this.jump,
   });
 
   @override
@@ -560,22 +577,18 @@ class _RealBatchSession implements BatchSession {
 
   @override
   Future<void> connect() async {
-    final connection = SshConnection(
+    final connection = buildHostConnection(
       host: host,
       credential: credential,
+      db: database,
       connectTimeout: connectTimeout,
-      onHostKeyVerify: buildHostKeyVerifier(
-        db: database,
-        address: host.ipAddress,
-        port: host.port,
-        // Refused, and recorded. A batch is not a place to ask: the prompt would
-        // have to be modal per host, and answering it on the user's behalf is
-        // the one thing this app never does.
-        onPrompt: (_, _) async {
-          trustRefused = true;
-          return false;
-        },
-      ),
+      jump: jump,
+      // Refused, and recorded. A batch is not a place to ask: the prompt would
+      // have to be modal per host, and answering it on the user's behalf is the
+      // one thing this app never does.
+      refuseUntrusted: true,
+      onTrustRefused: () => trustRefused = true,
+      onPrompt: (_, _) async => false,
     );
     _connection = connection;
     await connection.connect();
