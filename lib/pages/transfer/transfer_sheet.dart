@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/i18n/strings.dart';
 import '../../models/transfer_task.dart';
+import 'folder_zip.dart';
 import '../../providers/transfer_provider.dart';
 import '../../widgets/app_ui.dart';
 import 'transfer_format.dart';
@@ -119,6 +120,10 @@ class TransferSheet extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 4),
+            // The folders this queue is carrying, above the rows that make them
+            // up: forty paths in a list are otherwise indistinguishable from
+            // forty unrelated downloads.
+            _FolderBatches(taskIds: view.taskIds),
             Flexible(
               child: view.taskIds.isEmpty
                   ? const _EmptyQueue()
@@ -463,4 +468,161 @@ void _snack(BuildContext context, String message, {bool isError = false}) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
   );
+}
+
+/// One row per folder download in the queue: how far it has come, and how to get
+/// it off the device once it is complete.
+///
+/// A folder download is a dozen to a few hundred ordinary rows, so without this
+/// the sheet gives no sign that they are one thing, no way to tell how much of
+/// the folder has arrived, and no way to take delivery of it — the bytes would
+/// sit in the app's staging area with nowhere to go, because Android will not
+/// let this app write a tree to a user-chosen directory.
+class _FolderBatches extends ConsumerWidget {
+  final List<String> taskIds;
+
+  const _FolderBatches({required this.taskIds});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tasks = ref.watch(transferQueueProvider);
+    final byId = {for (final task in tasks) task.id: task};
+    final mine = [
+      for (final id in taskIds)
+        if (byId[id] != null) byId[id]!,
+    ];
+    final batches = folderBatches(mine);
+    if (batches.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      children: [
+        for (final batch in batches)
+          _FolderBatchRow(batch: batch),
+      ],
+    );
+  }
+}
+
+/// The row itself: name, progress, and — once every file has arrived — the one
+/// action that delivers the folder.
+class _FolderBatchRow extends ConsumerStatefulWidget {
+  final FolderBatch batch;
+
+  const _FolderBatchRow({required this.batch});
+
+  @override
+  ConsumerState<_FolderBatchRow> createState() => _FolderBatchRowState();
+}
+
+class _FolderBatchRowState extends ConsumerState<_FolderBatchRow> {
+  bool _saving = false;
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final outcome = await saveFolderAsZip(widget.batch);
+      if (!mounted) return;
+      final message = switch (outcome) {
+        FolderSaveOutcome.saved => t('folder_zip_saved'),
+        FolderSaveOutcome.tooLarge => t('folder_zip_too_large'),
+        FolderSaveOutcome.failed => t('folder_zip_failed'),
+        FolderSaveOutcome.empty => t('folder_zip_empty'),
+        FolderSaveOutcome.cancelled => null,
+      };
+      if (message != null) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(message),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final batch = widget.batch;
+    final done = batch.tasks.where((t) => t.status == TransferStatus.done).length;
+    final failed = batch.tasks
+        .where((t) => t.status == TransferStatus.failed)
+        .length;
+
+    return AppCard(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      borderColor: (failed > 0 ? cs.error : cs.primary).withValues(alpha: 0.5),
+      child: Row(
+        children: [
+          AppIconBox(
+            icon: Icons.folder_zip_outlined,
+            color: failed > 0 ? cs.error : cs.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  batch.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cs.onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  t('folder_progress')
+                      .replaceAll('{0}', '${batch.tasks.length}')
+                      .replaceAll('{1}', '$done')
+                      .replaceAll('{2}', '${batch.tasks.length}'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cs.onSurface.withValues(alpha: 0.55),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (_saving)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else if (batch.isComplete)
+            TextButton.icon(
+              onPressed: _save,
+              icon: Icon(Icons.save_alt, size: 16, color: cs.primary),
+              label: Text(
+                t('save_folder_zip'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: cs.primary, fontSize: 12),
+              ),
+            )
+          else
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.secondary,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

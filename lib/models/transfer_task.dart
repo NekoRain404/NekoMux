@@ -132,6 +132,20 @@ class TransferTask {
   /// 把它与 [error] 一起交给 `sftpFailureText`，就能得到用户可读的文字。
   final String? errorDetail;
 
+  /// The staging root of the folder this download is part of, or null when it
+  /// is a single file.
+  ///
+  /// A folder download is queued as ordinary per-file transfers — which is what
+  /// gives each file its own row, its own cancel and its own retry — and this is
+  /// the one thing that remembers they belong together. It is also where the
+  /// staged tree lives, so the archive that delivers them is built from the same
+  /// path the files were written to.
+  final String? folderRoot;
+
+  /// A name for that folder: the archive is named after it, and the row that
+  /// offers to save it says which folder it is.
+  final String? folderName;
+
   const TransferTask({
     required this.id,
     required this.hostId,
@@ -140,6 +154,8 @@ class TransferTask {
     this.localPath,
     required this.direction,
     this.totalBytes,
+    this.folderRoot,
+    this.folderName,
     this.transferredBytes = 0,
     this.status = TransferStatus.queued,
     this.error,
@@ -203,6 +219,8 @@ class TransferTask {
       localPath: localPath,
       direction: direction,
       totalBytes: totalBytes ?? this.totalBytes,
+      folderRoot: folderRoot,
+      folderName: folderName,
       transferredBytes: transferredBytes ?? this.transferredBytes,
       status: status ?? this.status,
       error: clearError ? null : error,
@@ -221,6 +239,8 @@ class TransferTask {
       localPath: localPath,
       direction: direction,
       totalBytes: totalBytes,
+      folderRoot: folderRoot,
+      folderName: folderName,
       transferredBytes: transferredBytes,
       status: TransferStatus.failed,
       error: code,

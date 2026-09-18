@@ -91,40 +91,48 @@ void main() {
     expect(ops.removed, ['/tmp/empty']);
   });
 
-  test('a failure names the path it stopped at, and keeps what it removed',
-      () async {
-    final ops = _FakeTree(
-      {
-        '/data': [file('/data/keep.log'), file('/data/locked.log')],
-      },
-      failing: {'/data/locked.log'},
-    );
+  test(
+    'a failure names the path it stopped at, and keeps what it removed',
+    () async {
+      final ops = _FakeTree(
+        {
+          '/data': [file('/data/keep.log'), file('/data/locked.log')],
+        },
+        failing: {'/data/locked.log'},
+      );
 
-    final result = await deleteTree(ops, '/data', isDirectory: true);
+      final result = await deleteTree(ops, '/data', isDirectory: true);
 
-    expect(result.complete, isFalse);
-    expect(result.failedPath, '/data/locked.log');
-    expect(result.removed, 1, reason: 'what was already deleted stays deleted');
-    expect(ops.removed, ['/data/keep.log']);
-  });
+      expect(result.complete, isFalse);
+      expect(result.failedPath, '/data/locked.log');
+      expect(
+        result.removed,
+        1,
+        reason: 'what was already deleted stays deleted',
+      );
+      expect(ops.removed, ['/data/keep.log']);
+    },
+  );
 
-  test('a failing subdirectory reports the subdirectory, not the root',
-      () async {
-    // The distinction matters to the user: "permission denied on
-    // /var/www/private" is actionable, "/var/www failed" is not.
-    final ops = _FakeTree(
-      {
-        '/var/www': [dir('/var/www/private')],
-        '/var/www/private': [file('/var/www/private/key.pem')],
-      },
-      failing: {'/var/www/private/key.pem'},
-    );
+  test(
+    'a failing subdirectory reports the subdirectory, not the root',
+    () async {
+      // The distinction matters to the user: "permission denied on
+      // /var/www/private" is actionable, "/var/www failed" is not.
+      final ops = _FakeTree(
+        {
+          '/var/www': [dir('/var/www/private')],
+          '/var/www/private': [file('/var/www/private/key.pem')],
+        },
+        failing: {'/var/www/private/key.pem'},
+      );
 
-    final result = await deleteTree(ops, '/var/www', isDirectory: true);
+      final result = await deleteTree(ops, '/var/www', isDirectory: true);
 
-    expect(result.failedPath, '/var/www/private/key.pem');
-    expect(ops.removed, isEmpty);
-  });
+      expect(result.failedPath, '/var/www/private/key.pem');
+      expect(ops.removed, isEmpty);
+    },
+  );
 
   test('the entry cap stops the walk and says so', () async {
     // A cap that reports where it stopped is honest about what it did; a walk
@@ -147,5 +155,87 @@ void main() {
       isFalse,
       reason: 'the directory itself must not go while entries remain',
     );
+  });
+
+  group('scanTree', () {
+    /// The scan that a folder download is built on.
+    ///
+    /// Separate from the delete walk's tests because it answers a different
+    /// question: not "in what order do these go away" but "what exactly is in
+    /// there, and what is going to be missing from the copy".
+    test('every file is listed with its path relative to the root', () async {
+      final ops = _FakeTree({
+        '/var/www': [dir('/var/www/html'), file('/var/www/index.html')],
+        '/var/www/html': [file('/var/www/html/a.html')],
+      });
+
+      final result = await scanTree(ops, '/var/www');
+
+      expect(result.complete, isTrue);
+      expect(
+        result.files.map((f) => f.relativePath).toList(),
+        ['html/a.html', 'index.html'],
+        reason:
+            'the relative path is what keeps two same-named files apart in '
+            'the archive',
+      );
+      expect(result.files.first.remotePath, '/var/www/html/a.html');
+    });
+
+    test('an empty directory is counted rather than silently dropped', () async {
+      // The archive reproduces files, not folders, so an empty one is a thing the
+      // user will not find in the result — and being told is the difference
+      // between a faithful copy and a surprising one.
+      final ops = _FakeTree({
+        '/etc/app': [dir('/etc/app/empty'), file('/etc/app/app.conf')],
+        '/etc/app/empty': const [],
+      });
+
+      final result = await scanTree(ops, '/etc/app');
+
+      expect(result.complete, isTrue);
+      expect(result.files, hasLength(1));
+      expect(result.emptyDirectories, 1);
+    });
+
+    test('a file directly at the root has no prefix', () async {
+      final ops = _FakeTree({
+        '/data': [file('/data/one.txt')],
+      });
+
+      final result = await scanTree(ops, '/data');
+
+      expect(result.files.single.relativePath, 'one.txt');
+    });
+
+    test('a failure keeps what was found and names where it stopped', () async {
+      // The readable file is listed first on purpose: what this pins is that a
+      // walk which dies part-way still hands back what it had already found,
+      // rather than losing the lot because one subdirectory refused.
+      final ops = _FakeTree({
+        '/data': [file('/data/open.txt'), dir('/data/locked')],
+        // '/data/locked' is absent from the map, so listing it throws.
+      });
+
+      final result = await scanTree(ops, '/data');
+
+      expect(result.complete, isFalse);
+      expect(result.failedPath, '/data/locked');
+      expect(
+        result.files.map((f) => f.relativePath),
+        contains('open.txt'),
+        reason: 'what was already found is still worth reporting',
+      );
+    });
+
+    test('the entry cap stops the scan and says so', () async {
+      final many = [for (var i = 0; i < 10; i++) file('/bulk/f$i')];
+      final ops = _FakeTree({'/bulk': many});
+
+      final result = await scanTree(ops, '/bulk', maxEntries: 3);
+
+      expect(result.complete, isFalse);
+      expect(result.files, hasLength(3));
+    });
   });
 }

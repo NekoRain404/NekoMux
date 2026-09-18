@@ -417,6 +417,12 @@ class TransferRunner {
       throw const TransferLocalIoException('download has no local path');
     }
 
+    // The staging path for a folder download mirrors the remote tree, so its
+    // parent directory may not exist yet. Creating it here rather than at
+    // enqueue time keeps the guarantee local: whatever path this task was given,
+    // it can write to by the time it opens the sink.
+    await File(localPath).parent.create(recursive: true);
+
     final start = resume ? await _resumeOffset(task) : 0;
     // Append when there is something to append to — `openWrite` truncates, so
     // opening the partial file the ordinary way would delete exactly the bytes

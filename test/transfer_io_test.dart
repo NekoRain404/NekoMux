@@ -14,6 +14,7 @@ import 'package:neko_mux/pages/transfer/transfer_actions.dart';
 import 'package:neko_mux/pages/transfer/transfer_io.dart';
 import 'package:neko_mux/pages/transfer/transfer_sheet.dart';
 import 'package:neko_mux/providers/transfer_provider.dart';
+import 'package:neko_mux/services/sftp_tree.dart';
 import 'package:neko_mux/services/transfer_runner.dart';
 
 import 'transfer_fake_session.dart';
@@ -603,6 +604,92 @@ void main() {
 
       expect(picker.saveCalls, 0);
       expect(find.text(t('file_too_large')), findsOneWidget);
+    });
+  });
+
+  group('folder download queueing', () {
+  /// Queueing a folder's files, which is where the walk meets the queue.
+    testWidgets('every scanned file is queued under its own relative path', (
+      tester,
+    ) async {
+      // The relative path is the whole point: a folder download that flattened
+      // `logs/app/day1.txt` to `day1.txt` would put a dozen same-named files in
+      // one place, and the archive built from it could not carry the folder's
+      // shape.
+      final container = idleContainer();
+
+      late BatchDownloadResult queued;
+      await runAndRead(tester, container, (ref) async {
+        queued = queueFolderDownloadToStaging(
+          ref,
+          hostId: 'h1',
+          folderName: 'logs',
+          files: const [
+            TreeFile(
+              remotePath: '/var/logs/app/day1.txt',
+              relativePath: 'app/day1.txt',
+              size: 120,
+            ),
+            TreeFile(remotePath: '/var/logs/top.txt', relativePath: 'top.txt'),
+          ],
+        );
+        return queued;
+      });
+
+      expect(queued.queued, 2);
+      expect(container.read(transferQueueProvider), hasLength(2));
+
+      final tasks = container.read(transferQueueProvider);
+      expect(tasks[0].name, 'app/day1.txt');
+      expect(tasks[0].totalBytes, 120);
+      expect(
+        tasks[0].localPath,
+        contains('/app/day1.txt'),
+        reason: 'the local path mirrors the remote tree',
+      );
+      expect(
+        tasks[1].localPath!.endsWith('/top.txt'),
+        isTrue,
+      );
+      expect(
+        tasks[0].localPath!.split('/').last,
+        'day1.txt',
+        reason: 'the file keeps its own name inside the mirrored tree',
+      );
+    });
+
+    testWidgets('an empty scan queues nothing and says so', (tester) async {
+      final container = idleContainer();
+      late BatchDownloadResult queued;
+      await runAndRead(tester, container, (ref) async {
+        queued = queueFolderDownloadToStaging(
+          ref,
+          hostId: 'h1',
+          folderName: 'empty',
+          files: const [],
+        );
+        return queued;
+      });
+
+      expect(queued.queued, 0);
+      expect(queued.outcome, TransferQueueOutcome.cancelled);
+      expect(container.read(transferQueueProvider), isEmpty);
+    });
+
+    test('each folder download stages into a directory of its own', () {
+      // Two downloads of `logs/` must not write into each other's tree, and the
+      // name keeps the folder's own name so the staging directory is readable to
+      // a human debugging it.
+      final first = stagedFolderPath('logs');
+      final second = stagedFolderPath('logs');
+
+      expect(first, isNot(second));
+      expect(first, contains('logs'));
+      expect(
+        stagedFolderPath('a b/c').contains('a_b_c'),
+        isTrue,
+        reason: 'a name with separators must not invent directories',
+      );
     });
   });
 }

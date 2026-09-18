@@ -52,11 +52,22 @@ and only run when asked for explicitly.
    adb reverse tcp:2223 tcp:2223   # the batch suite's second host
    ```
 
-3. Create the fixtures the download test reads (once) / 准备下载测试所需的夹具（一次）:
+3. Create the fixtures the download tests read (once) / 准备下载测试所需的夹具（一次）:
 
    ```bash
    sshpass -p nekotest ssh -p 2222 nekotest@127.0.0.1 \
      'mkdir -p ~/fixtures && head -c 200000 /dev/urandom > ~/fixtures/rand200k.bin'
+
+   # The nested tree the folder-download suite reproduces, empty directory and
+   # all: the empty one is what proves the scan reports what it could not carry.
+   sshpass -p nekotest ssh -p 2222 nekotest@127.0.0.1 '
+     rm -rf /config/tree &&
+     mkdir -p /config/tree/app/logs /config/tree/conf /config/tree/empty &&
+     echo "top level" > /config/tree/readme.txt &&
+     head -c 150000 /dev/urandom > /config/tree/app/big.bin &&
+     echo "day one" > /config/tree/app/logs/day1.txt &&
+     echo "day two" > /config/tree/app/logs/day2.txt &&
+     printf "server_name x;\n" > /config/tree/conf/nginx.conf'
    ```
 
 4. Run / 运行:
@@ -71,6 +82,8 @@ and only run when asked for explicitly.
 | --- | --- |
 | `transfer_roundtrip_test.dart` | bytes through the real network stack, both directions, plus a tunnel |
 | `batch_exec_test.dart` | one command on two real servers; each answers for itself, and neither a dead host nor a failing command stops the rest |
+| `jump_host_test.dart` | a target this phone cannot route to, reached through a bastion — with the premise asserted, so the test cannot stop proving anything |
+| `folder_download_test.dart` | a whole folder's tree reproduced on the device, file for file, with the empty directory reported |
 
 | Test | What a failure means |
 | --- | --- |

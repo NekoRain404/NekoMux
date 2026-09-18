@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/file_item.dart';
 import '../../providers/transfer_provider.dart';
+import '../../services/sftp_tree.dart';
 import '../sftp/sftp_path.dart';
 import 'transfer_io.dart';
 
@@ -47,9 +48,6 @@ enum TransferQueueOutcome {
 /// 可能在列举进行中不一致，而 `DirectoryLoadState.commitFailed` 会在失败后把两者复原，
 /// 因此二者不会长期分离。
 ///
-/// Returns as soon as the task is in the list: the picker is the only thing the
-/// user waits on, and the transfer itself never blocks them.
-/// 任务入列后立即返回：用户唯一需要等待的只有选择器，传输本身从不阻塞他们。
 /// The outcome of asking the platform which files to upload.
 class UploadPickResult {
   /// What the picker returned; empty when it was dismissed or it failed.
@@ -333,4 +331,71 @@ TransferQueueOutcome queueDownloadToStaging(
         totalBytes: file.size > 0 ? file.size : null,
       );
   return TransferQueueOutcome.queued;
+}
+
+/// The staging directory one folder download lands in.
+///
+/// A directory of its own per download, named after the folder and stamped with
+/// the time: two downloads of `logs/` — from two hosts, or the same folder
+/// twice — must not write into each other's tree while both are in flight, and
+/// the structure inside is what the archive will reproduce.
+///
+/// [_stagingFolderName] is the only thing that decides the name, so a test can
+/// pin it without touching the filesystem.
+String stagedFolderPath(String folderName) =>
+    '${transferStagingDirectory().path}/${_stagingFolderName(folderName)}';
+
+String _stagingFolderName(String folderName) {
+  final safe = folderName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+  return 'folder_${DateTime.now().microsecondsSinceEpoch}_$safe';
+}
+
+/// Queues one download per file a folder scan found.
+///
+/// The tree is reproduced under [stagedFolderPath], so a file at
+/// `logs/app/day1.txt` inside the folder is staged as `…/logs/app/day1.txt` —
+/// which is what lets the archive carry the folder's shape rather than a heap of
+/// names. Each file is an ordinary transfer: it shows its own row, can be
+/// cancelled on its own, and resumes on retry like any other download.
+///
+/// Synchronous end to end, like the flat batch it mirrors: the loop appends to
+/// the queue's list and returns, and nothing in it awaits a socket or a disk.
+BatchDownloadResult queueFolderDownloadToStaging(
+  WidgetRef ref, {
+  required String hostId,
+  required String folderName,
+  required List<TreeFile> files,
+}) {
+  if (files.isEmpty) {
+    return const BatchDownloadResult(0, TransferQueueOutcome.cancelled);
+  }
+
+  final root = stagedFolderPath(folderName);
+  var queued = 0;
+  var outcome = TransferQueueOutcome.queued;
+  for (final file in files) {
+    try {
+      transferStagingDirectory().createSync(recursive: true);
+    } catch (e) {
+      outcome = TransferQueueOutcome.localIo;
+      continue;
+    }
+    ref
+        .read(transferQueueProvider.notifier)
+        .enqueueDownload(
+          hostId: hostId,
+          remotePath: file.remotePath,
+          localPath: '$root/${file.relativePath}',
+          // The relative path, not the bare name: a row reading `day1.txt`
+          // three times over tells the user nothing about which one failed.
+          name: file.relativePath,
+          totalBytes: file.size,
+          // The one thing that remembers these rows are one folder, and where
+          // its staged tree lives.
+          folderRoot: root,
+          folderName: folderName,
+        );
+    queued++;
+  }
+  return BatchDownloadResult(queued, outcome);
 }

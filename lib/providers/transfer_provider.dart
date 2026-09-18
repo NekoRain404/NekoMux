@@ -315,6 +315,8 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
     required String localPath,
     String? name,
     int? totalBytes,
+    String? folderRoot,
+    String? folderName,
   }) {
     return enqueue(
       hostId: hostId,

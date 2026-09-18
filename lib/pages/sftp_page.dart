@@ -9,6 +9,7 @@ import '../models/file_item.dart';
 import '../models/host.dart';
 import '../providers/transfer_provider.dart';
 import '../services/sftp_service.dart';
+import '../services/sftp_tree.dart';
 import '../widgets/app_ui.dart';
 import 'sftp/directory_load_state.dart';
 import 'sftp/file_selection.dart';
@@ -79,6 +80,9 @@ class _SftpPageState extends ConsumerState<SftpPage>
   /// 一旦提交过，后续失败应当**叠加**在该列表之上（用浮层提示），而不是用整页错误
   /// 取代它——那会连带丢掉用户仍然可以操作的目录。
   bool _hasListingOnScreen = false;
+
+  /// True while a folder's tree is being walked, before anything is queued.
+  bool _scanning = false;
 
 
   @override
@@ -209,6 +213,61 @@ class _SftpPageState extends ConsumerState<SftpPage>
     _loadDirectory(crumbs[index].path);
   }
 
+  /// Scans a directory and queues every file under it.
+  ///
+  /// The walk happens here, before anything is queued, because the queue moves
+  /// files and has no recursion behind it — and because the user is owed the
+  /// answer to "how much is this?" before it starts moving. What the scan could
+  /// not carry is reported rather than quietly dropped: an empty folder leaves
+  /// nothing to download, and a subdirectory that refused is the difference
+  /// between a faithful copy and one the user only discovers is incomplete later.
+  Future<void> _queueFolderDownload(FileItem folder) async {
+    final service = sftpService;
+    if (service == null) return;
+
+    setState(() => _scanning = true);
+    final TreeScanResult scan;
+    try {
+      scan = await scanTree(service, folder.path);
+    } on SftpException catch (e) {
+      if (mounted) _showSnack(sftpErrorText(e), isError: true);
+      return;
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
+    if (!mounted) return;
+
+    if (!scan.complete) {
+      _showSnack(
+        t(
+          'folder_scan_incomplete',
+        ).replaceAll('{0}', scan.failedPath ?? folder.path),
+        isError: true,
+      );
+    }
+    if (scan.files.isEmpty) {
+      _showSnack(t('folder_has_no_files'));
+      return;
+    }
+
+    final result = queueFolderDownloadToStaging(
+      ref,
+      hostId: widget.host.id,
+      folderName: folder.name,
+      files: scan.files,
+    );
+    if (!mounted) return;
+    if (result.outcome == TransferQueueOutcome.localIo) {
+      _showSnack(t('transfer_error_local_io'), isError: true);
+      return;
+    }
+    _showSnack(
+      t('folder_queued')
+          .replaceAll('{0}', '${result.queued}')
+          .replaceAll('{1}', '${scan.emptyDirectories}'),
+    );
+  }
+
   /// Asks for a path and goes there.
   ///
   /// The breadcrumb bar can only go *up*: reaching `/var/log/nginx` from `/`
@@ -276,6 +335,8 @@ class _SftpPageState extends ConsumerState<SftpPage>
         }
       case SftpFileAction.download:
         _queueDownload(file);
+      case SftpFileAction.downloadFolder:
+        await _queueFolderDownload(file);
       case SftpFileAction.rename:
         await _showRenameDialog(file);
       case SftpFileAction.changePermissions:
@@ -604,7 +665,22 @@ class _SftpPageState extends ConsumerState<SftpPage>
           style: TextStyle(color: cs.onSurface),
         ),
         actions: [
-          if (!isConnecting)
+          // The same treatment the console's refresh gets, for the same reason:
+          // a folder scan walks a tree one listing at a time, so on a large
+          // directory it is seconds of work with nothing moving on screen, and
+          // the icon that started it must not stay tappable through it.
+          if (_scanning)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              child: Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else if (!isConnecting)
             IconButton(
               icon: Icon(
                 Icons.refresh,

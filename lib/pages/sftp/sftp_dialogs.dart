@@ -256,6 +256,11 @@ enum SftpFileAction {
   /// 把它从服务器复制到本机。
   download,
 
+  /// Copy a whole directory — every file under it — to this device, as one
+  /// archive once the files have been staged.
+  /// 把整个目录（含其中所有文件）复制到本机；文件暂存完成后打包成一个归档。
+  downloadFolder,
+
   /// Rename or move it.
   /// 重命名或移动。
   rename,
@@ -376,6 +381,14 @@ Future<SftpFileAction?> showSftpFileActions(
                 label: t('download'),
                 color: cs.primary,
                 onTap: () => Navigator.pop(ctx, SftpFileAction.download),
+              ),
+            if (file.isDirectory)
+              _ActionTile(
+                icon: Icons.download_outlined,
+                label: t('download_folder'),
+                color: cs.primary,
+                onTap: () =>
+                    Navigator.pop(ctx, SftpFileAction.downloadFolder),
               ),
             _ActionTile(
               icon: Icons.drive_file_rename_outline,
