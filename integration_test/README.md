@@ -22,16 +22,34 @@ and only run when asked for explicitly.
 
 ## Running them / 运行方式
 
-1. Start the test server / 启动测试服务器:
+1. Start the test servers / 启动测试服务器:
 
    ```bash
+   # The transfer fixture, and the target the batch suite needs a SECOND of:
+   # two answers can only be told apart when two machines give them.
    docker start nekomux-test-ssh      # publishes 127.0.0.1:2222
+   docker start nekomux-test-ssh-2    # publishes 127.0.0.1:2223, -h neko-target
    ```
 
-2. Tunnel it to the phone / 把隧道打到手机上:
+   The second one is created once with:
+
+   ```bash
+   docker run -d --name nekomux-test-ssh-2 -h neko-target \
+     -e PUID=1000 -e PGID=1000 -e USER_NAME=nekotest -e USER_PASSWORD=nekotest \
+     -e PASSWORD_ACCESS=true -e SUDO_ACCESS=false \
+     -p 127.0.0.1:2223:2222 lscr.io/linuxserver/openssh-server:latest
+   ```
+
+   Both need `AllowTcpForwarding yes` in `/config/sshd/sshd_config` — note that
+   the linuxserver image runs `sshd -f /config/sshd/sshd_config`, NOT
+   `/etc/ssh/sshd_config`, and a change to the wrong file looks exactly like a
+   change that did not take effect.
+
+2. Tunnel them to the phone / 把隧道打到手机上:
 
    ```bash
    adb reverse tcp:2222 tcp:2222
+   adb reverse tcp:2223 tcp:2223   # the batch suite's second host
    ```
 
 3. Create the fixtures the download test reads (once) / 准备下载测试所需的夹具（一次）:
@@ -48,6 +66,11 @@ and only run when asked for explicitly.
    ```
 
 ## What it checks / 检查内容
+
+| Suite | What it covers |
+| --- | --- |
+| `transfer_roundtrip_test.dart` | bytes through the real network stack, both directions, plus a tunnel |
+| `batch_exec_test.dart` | one command on two real servers; each answers for itself, and neither a dead host nor a failing command stops the rest |
 
 | Test | What a failure means |
 | --- | --- |

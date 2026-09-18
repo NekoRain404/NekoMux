@@ -10,6 +10,7 @@ import '../services/host_key_trust.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/app_ui.dart';
+import 'batch_exec_page.dart';
 import 'host_console_page.dart';
 import 'add_host_page.dart';
 import 'ssh_terminal_page.dart';
@@ -380,6 +381,20 @@ class _HomePageState extends ConsumerState<HomePage> {
             overflow: TextOverflow.ellipsis,
           ),
           actions: [
+            // The batch lives here rather than inside a host's console because
+            // it is the one action that is about the list itself: pick several,
+            // run one command on all of them.
+            IconButton(
+              icon: Icon(Icons.playlist_play, color: cs.secondary),
+              tooltip: t('run_on_many'),
+              // Always enabled, even with no hosts: the page it opens says so
+              // and offers the way to add one, which is a better answer than a
+              // button that silently does nothing.
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BatchExecPage()),
+              ),
+            ),
             IconButton(
               icon: Icon(Icons.add, color: cs.secondary),
               onPressed: () => _openAddHost(context),
