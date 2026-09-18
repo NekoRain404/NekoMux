@@ -13,11 +13,13 @@ import '../task_manager_page.dart';
 /// The feature launcher under the resource panel.
 /// 资源面板下方的功能入口。
 ///
-/// Every tile opens a page that really does the thing it names; the one that
-/// does not exist yet (remote desktop) is disabled and badged as upcoming
-/// rather than opening a plausible-looking fake.
-/// 每个瓷片都打开一个真正能做该事的页面；唯一尚不存在的能力（远程桌面）被禁用并
-/// 标注「即将支持」，而不是打开一个看起来像样的假页面。
+/// Every tile opens a page that really does the thing it names. There is no
+/// disabled tile: a permanently greyed entry advertising a feature nothing is
+/// building is a promise the app cannot keep, and this project's rule is that a
+/// plausible-looking thing that does not work is worse than an absent one.
+/// 每个瓷片都打开一个真正能做该事的页面。这里没有禁用状态的瓷片：一个永远灰着、宣称
+/// 一项无人开发的功能的入口，是应用兑现不了的承诺；而本项目的规则是，一个看起来像样
+/// 却做不到的东西，比没有更糟。
 class ConsoleFunctionGrid extends StatelessWidget {
   /// Host whose modules are launched.
   /// 要启动模块的主机。
@@ -125,14 +127,6 @@ class ConsoleFunctionGrid extends StatelessWidget {
                   context,
                   MaterialPageRoute(builder: (_) => TunnelsPage(host: host)),
                 ),
-              ),
-              FunctionGridTile(
-                icon: Icons.desktop_windows_outlined,
-                iconColor: cs.onSurface.withValues(alpha: 0.42),
-                title: t('remote_desktop'),
-                subtitle: t('vnc'),
-                enabled: false,
-                badge: t('soon_badge'),
               ),
             ],
           ),

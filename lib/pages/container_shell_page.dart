@@ -612,8 +612,6 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 24),
-            const AddContainerNotice(),
           ],
         ),
       );
@@ -629,7 +627,12 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
         itemCount: _containers.length + 1,
         itemBuilder: (context, index) {
           if (index == _containers.length) {
-            return const AddContainerNotice();
+            return AppEmptyState(
+              icon: Icons.inbox_outlined,
+              title: t('no_containers'),
+              message: t('no_containers_hint'),
+              color: cs.primary,
+            );
           }
           final container = _containers[index];
           return ContainerCard(
