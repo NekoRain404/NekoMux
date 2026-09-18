@@ -29,6 +29,9 @@ class FakeTransferSession implements TransferSession {
 
   final List<String> startedUploads = [];
   final List<String> startedDownloads = [];
+
+  /// The offset each download was asked to start at, in call order.
+  final List<int> downloadOffsets = [];
   final List<String> finishedDownloads = [];
   final List<String> cancelledDownloads = [];
   final List<String> completedUploads = [];
@@ -93,9 +96,11 @@ class FakeTransferSession implements TransferSession {
   @override
   Stream<Uint8List> download(
     String path, {
+    int from = 0,
     void Function(int bytesRead)? onProgress,
   }) async* {
     startedDownloads.add(path);
+    downloadOffsets.add(from);
     _enter();
     var reachedEnd = false;
     try {
@@ -139,6 +144,7 @@ class FakeTransferSession implements TransferSession {
   Future<void> upload(
     String path,
     Stream<Uint8List> data, {
+    int at = 0,
     void Function(int bytesWritten)? onProgress,
   }) async {
     startedUploads.add(path);

@@ -37,6 +37,7 @@ class _FailsAfterProgress implements TransferSession {
   @override
   Stream<Uint8List> download(
     String path, {
+    int from = 0,
     void Function(int bytesRead)? onProgress,
   }) async* {
     var sent = 0;
@@ -53,6 +54,7 @@ class _FailsAfterProgress implements TransferSession {
   Future<void> upload(
     String path,
     Stream<Uint8List> data, {
+    int at = 0,
     void Function(int bytesWritten)? onProgress,
   }) async {
     throw UnimplementedError('not used by these tests');

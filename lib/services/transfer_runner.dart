@@ -26,18 +26,27 @@ abstract class TransferSession {
   /// [path] 路径下远程文件的大小（字节），未知时为 null。
   Future<int?> size(String path);
 
-  /// Streams the remote file at [path] in chunks.
-  /// 以分块方式流式读取 [path] 路径下的远程文件。
+  /// Streams the remote file at [path] in chunks, starting [from] bytes in.
+  ///
+  /// The offset is what a resumed download needs: the caller holds those bytes
+  /// already and wants the rest. Progress is reported against the whole file.
+  /// 以分块方式流式读取 [path] 路径下的远程文件。[from] 是起始偏移，正是断点续传所需：
+  /// 调用方已经持有那部分字节，只想要剩下的。进度按整份文件上报。
   Stream<Uint8List> download(
     String path, {
+    int from = 0,
     void Function(int bytesRead)? onProgress,
   });
 
-  /// Writes [data] to the remote file at [path].
-  /// 将 [data] 写入 [path] 路径下的远程文件。
+  /// Writes [data] to the remote file at [path], starting at byte [at] and
+  /// leaving whatever the server holds before that position untouched — which is
+  /// the whole difference between a resumed upload and one that starts over.
+  /// 将 [data] 写入 [path] 路径下的远程文件，从第 [at] 字节开始，且不动服务器上该位置
+  /// 之前的内容——这正是「续传」与「重来」的全部区别。
   Future<void> upload(
     String path,
     Stream<Uint8List> data, {
+    int at = 0,
     void Function(int bytesWritten)? onProgress,
   });
 
@@ -61,15 +70,17 @@ class SftpTransferSession implements TransferSession {
   @override
   Stream<Uint8List> download(
     String path, {
+    int from = 0,
     void Function(int bytesRead)? onProgress,
-  }) => service.downloadStream(path, onProgress: onProgress);
+  }) => service.downloadStream(path, offset: from, onProgress: onProgress);
 
   @override
   Future<void> upload(
     String path,
     Stream<Uint8List> data, {
+    int at = 0,
     void Function(int bytesWritten)? onProgress,
-  }) => service.uploadStream(path, data, onProgress: onProgress);
+  }) => service.uploadStream(path, data, offset: at, onProgress: onProgress);
 
   @override
   Future<void> close() => service.disconnect();
@@ -202,15 +213,84 @@ class TransferRunner {
   /// cancel flag is not a substitute.
   /// 返回的 [TransferOutcome] 说明它是如何结束的，调用方必须据此在「已完成」与「已取消」
   /// 之间做选择——原因见该枚举，它自己的取消标志并不能替代这一点。
+  /// [resume] asks for the transfer to continue from what the far side already
+  /// holds instead of starting over. It is a request, not an instruction: both
+  /// directions check that the pieces still line up before honouring it, and
+  /// start from zero when they do not — see [_resumeOffset] and
+  /// [_uploadResumeOffset].
   Future<TransferOutcome> move(
     TransferTask task,
     TransferCancelSignal signal,
-    void Function(int bytes) onProgress,
-  ) {
+    void Function(int bytes) onProgress, {
+    bool resume = false,
+  }) {
     return switch (task.direction) {
-      TransferDirection.upload => upload(task, signal, onProgress),
-      TransferDirection.download => download(task, signal, onProgress),
+      TransferDirection.upload => upload(task, signal, onProgress, resume: resume),
+      TransferDirection.download => download(
+        task,
+        signal,
+        onProgress,
+        resume: resume,
+      ),
     };
+  }
+
+  /// How many bytes of [task]'s download are already on disk and still match the
+  /// remote file, or 0 when the transfer has to start over.
+  ///
+  /// Both conditions matter. A partial file with no way to confirm that the
+  /// remote copy is the one it is a prefix of is not a resume — it is two
+  /// different versions spliced at a byte offset, which produces a file that is
+  /// the right size and wrong, the worst possible outcome for a backup or a
+  /// build artifact. So the remote size is compared against the size this task
+  /// was created knowing, and anything that does not line up starts from zero.
+  Future<int> _resumeOffset(TransferTask task) async {
+    final expected = task.totalBytes;
+    final localPath = task.localPath;
+    if (expected == null || expected <= 0 || localPath == null) return 0;
+
+    try {
+      final local = File(localPath);
+      if (!await local.exists()) return 0;
+      final have = await local.length();
+      // Nothing to gain from 0, and a file at or beyond the expected size is not
+      // a prefix of it: either it completed already or it belongs to something
+      // else.
+      if (have <= 0 || have >= expected) return 0;
+
+      final remote = await session.size(task.remotePath);
+      if (remote != expected) return 0;
+      return have;
+    } catch (_) {
+      // An unreadable local file or an unanswerable server means the resume
+      // cannot be verified, and an unverified resume is worse than a restart.
+      return 0;
+    }
+  }
+
+  /// How many bytes of [task]'s upload the server already holds, or 0 when the
+  /// upload has to start over.
+  ///
+  /// A remote file longer than the local one is not a prefix of it, so there is
+  /// nothing to continue from. The local size is also checked against what the
+  /// task was created with, so editing the file between attempts starts a fresh
+  /// upload rather than splicing old bytes under new ones.
+  Future<int> _uploadResumeOffset(TransferTask task) async {
+    final localPath = task.localPath;
+    if (localPath == null) return 0;
+
+    try {
+      final localLength = await File(localPath).length();
+      final expected = task.totalBytes;
+      if (expected != null && expected != localLength) return 0;
+
+      final remote = await session.size(task.remotePath);
+      if (remote == null || remote <= 0 || remote > localLength) return 0;
+      if (remote == localLength) return 0;
+      return remote;
+    } catch (_) {
+      return 0;
+    }
   }
 
   /// Reads the local file and feeds it to the server.
@@ -243,17 +323,21 @@ class TransferRunner {
   Future<TransferOutcome> upload(
     TransferTask task,
     TransferCancelSignal signal,
-    void Function(int bytesWritten) onProgress,
-  ) async {
+    void Function(int bytesWritten) onProgress, {
+    bool resume = false,
+  }) async {
     final localPath = task.localPath;
     if (localPath == null) {
       throw const TransferLocalIoException('upload has no local path');
     }
 
+    final start = resume ? await _uploadResumeOffset(task) : 0;
     final controller = StreamController<Uint8List>();
     Object? readError;
     var sourceEnded = false;
-    final source = File(localPath).openRead().listen(
+    // Opened at [start]: those bytes are already on the server, and sending them
+    // again would write them a second time at the wrong offset.
+    final source = File(localPath).openRead(start).listen(
       (chunk) => controller.add(_asBytes(chunk)),
       onDone: () {
         sourceEnded = true;
@@ -290,7 +374,8 @@ class TransferRunner {
       await session.upload(
         task.remotePath,
         controller.stream,
-        onProgress: onProgress,
+        at: start,
+        onProgress: (bytes) => onProgress(start + bytes),
       );
     } finally {
       signal.onCancel = null;
@@ -324,14 +409,21 @@ class TransferRunner {
   Future<TransferOutcome> download(
     TransferTask task,
     TransferCancelSignal signal,
-    void Function(int bytesRead) onProgress,
-  ) async {
+    void Function(int bytesRead) onProgress, {
+    bool resume = false,
+  }) async {
     final localPath = task.localPath;
     if (localPath == null) {
       throw const TransferLocalIoException('download has no local path');
     }
 
-    final sink = File(localPath).openWrite();
+    final start = resume ? await _resumeOffset(task) : 0;
+    // Append when there is something to append to — `openWrite` truncates, so
+    // opening the partial file the ordinary way would delete exactly the bytes
+    // the resume is built on.
+    final sink = start > 0
+        ? File(localPath).openWrite(mode: FileMode.append)
+        : File(localPath).openWrite();
     final finished = Completer<void>();
     StreamSubscription<Uint8List>? subscription;
     var reachedEnd = false;
@@ -342,7 +434,11 @@ class TransferRunner {
     };
 
     try {
-      final stream = session.download(task.remotePath, onProgress: onProgress);
+      final stream = session.download(
+        task.remotePath,
+        from: start,
+        onProgress: (bytes) => onProgress(start + bytes),
+      );
       subscription = stream.listen(
         sink.add,
         onError: (Object e, StackTrace st) {

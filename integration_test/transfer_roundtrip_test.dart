@@ -7,7 +7,9 @@ import 'package:integration_test/integration_test.dart';
 import 'package:neko_mux/models/credential.dart';
 import 'package:neko_mux/models/host.dart';
 import 'package:neko_mux/services/port_forward_service.dart';
+import 'package:neko_mux/models/transfer_task.dart';
 import 'package:neko_mux/services/sftp_service.dart';
+import 'package:neko_mux/services/transfer_runner.dart';
 import 'package:neko_mux/services/ssh_service.dart';
 
 /// End-to-end transfer verification, run ON THE PHONE against a real SSH
@@ -182,6 +184,91 @@ void main() {
       banner.toString(),
       contains('SSH-2.0'),
       reason: 'the server answered through the forward',
+    );
+  });
+
+  testWidgets('an interrupted download resumes and lands byte-identical', (
+    tester,
+  ) async {
+    // What a resume is worth is decided by its worst case: a file of exactly the
+    // right length holding bytes from two different versions of it. So this
+    // stops a real download part-way through a 3 MB file, resumes it through the
+    // runner, and compares the result with a download that was never
+    // interrupted — byte for byte, not by size.
+    const fixture = '$remoteDir/fixtures/big3m.bin';
+
+    final reference = await _collect(sftp.downloadStream(fixture));
+    expect(reference, hasLength(3000000));
+
+    final local = File('${Directory.systemTemp.path}/nekomux-resume.bin');
+    addTearDown(() {
+      if (local.existsSync()) local.deleteSync();
+    });
+    if (local.existsSync()) local.deleteSync();
+
+    // Interrupt on purpose: take the first few chunks, then hang up the way a
+    // dropped link does.
+    final sink = local.openWrite();
+    var taken = 0;
+    final partial = sftp.downloadStream(fixture);
+    final stopped = Completer<void>();
+    final subscription = partial.listen(
+      (chunk) {
+        sink.add(chunk);
+        taken += chunk.length;
+        if (taken >= 400000 && !stopped.isCompleted) stopped.complete();
+      },
+      onError: (Object e) => stopped.completeError(e),
+      onDone: () {
+        if (!stopped.isCompleted) stopped.complete();
+      },
+    );
+    await stopped.future;
+    await subscription.cancel();
+    await sink.close();
+
+    final partialLength = await local.length();
+    expect(
+      partialLength,
+      greaterThan(0),
+      reason: 'the interruption must leave something to resume from',
+    );
+    expect(
+      partialLength,
+      lessThan(reference.length),
+      reason: 'and it must not be the whole file',
+    );
+
+    // Now the resume, through the same runner the queue uses.
+    final runner = TransferRunner(SftpTransferSession(sftp));
+    final task = TransferTask(
+      id: 'resume',
+      hostId: 'integration',
+      name: 'big3m.bin',
+      remotePath: fixture,
+      localPath: local.path,
+      direction: TransferDirection.download,
+      totalBytes: reference.length,
+    );
+    final reported = <int>[];
+    final outcome = await runner.download(
+      task,
+      TransferCancelSignal(),
+      reported.add,
+      resume: true,
+    );
+
+    expect(outcome, TransferOutcome.completed);
+    expect(
+      reported.first,
+      greaterThanOrEqualTo(partialLength),
+      reason: 'the resumed run must report progress for the whole file, not '
+          'from zero',
+    );
+    expect(
+      await local.readAsBytes(),
+      reference,
+      reason: 'a byte-level difference means the resume spliced two versions',
     );
   });
 

@@ -412,8 +412,18 @@ class SftpService implements SftpTreeOps {
   /// 这里用 [StreamIterator] 读取而不是 `yield* file.read(...)`，只有一个原因：
   /// `yield*` 把整个等待交给了内层流，而一个永不结束的等待在这里无法被打断。迭代器把
   /// 「下一块」变成一个本方法可以与期限赛跑的 future，代价是每块多一个 future。
+  /// [offset] starts the read that many bytes into the file, which is what makes
+  /// a resumed download possible: the caller has those bytes on disk already and
+  /// wants the rest. Progress is reported against the whole file, not the
+  /// remainder — a bar that jumped back to zero halfway through a resumed
+  /// download would be describing a transfer the user is not having.
+  ///
+  /// An [offset] past the end reads nothing and returns at once (dartssh2
+  /// derives the remainder from a `stat` and returns an empty stream at
+  /// equality); that is the "already complete" case, not an error.
   Stream<Uint8List> downloadStream(
     String path, {
+    int offset = 0,
     void Function(int bytesRead)? onProgress,
   }) async* {
     _ensureConnected();
@@ -423,7 +433,15 @@ class SftpService implements SftpTreeOps {
     var stalled = false;
     try {
       file = await _sftp!.open(path, mode: SftpFileOpenMode.read);
-      reader = StreamIterator<Uint8List>(file.read(onProgress: onProgress));
+      reader = StreamIterator<Uint8List>(
+        file.read(
+          offset: offset,
+          // dartssh2 counts from the offset it was given, so the caller's
+          // progress is rebased onto the whole file here — the one place that
+          // knows both numbers.
+          onProgress: (n) => onProgress?.call(offset + n),
+        ),
+      );
       while (true) {
         final next = reader.moveNext();
         if (!await watch.race(next)) {
@@ -532,9 +550,18 @@ class SftpService implements SftpTreeOps {
   /// dartssh2 在被拒绝的那一块上抛出的东西在这里捕获不到——它所在的 future 属于
   /// dartssh2——但可以不让它处于**未处理**状态，这正是 [startGuardedSftpWrite] 所做的；
   /// 下面上报的诊断也来自它记录的错误，因此用户读到的是服务器自己的抱怨。
+  /// [offset] writes at that position instead of at the start, which is what
+  /// makes a resumed upload possible, and it is the *only* thing that decides
+  /// whether the file is truncated: a resumed write must preserve what the
+  /// server already holds, because that prefix is the part the previous attempt
+  /// transferred. The callers own that decision — see `transfer_runner.dart`,
+  /// which refuses to resume unless the sizes still line up.
+  ///
+  /// Progress is reported against the whole file, as with [downloadStream].
   Future<void> uploadStream(
     String path,
     Stream<Uint8List> data, {
+    int offset = 0,
     void Function(int bytesWritten)? onProgress,
   }) async {
     _ensureConnected();
@@ -544,18 +571,22 @@ class SftpService implements SftpTreeOps {
     try {
       final handle = file = await _sftp!.open(
         path,
-        mode:
-            SftpFileOpenMode.write |
-            SftpFileOpenMode.create |
-            SftpFileOpenMode.truncate,
+        mode: offset > 0
+            // Write and create, but do NOT truncate: the first [offset] bytes on
+            // the server are the prefix this resume is built on.
+            ? SftpFileOpenMode.write | SftpFileOpenMode.create
+            : SftpFileOpenMode.write |
+                  SftpFileOpenMode.create |
+                  SftpFileOpenMode.truncate,
       );
       final watch = TransferStallWatch(stallTimeout);
       final write = startGuardedSftpWrite(
         handle,
         guardedUploadSource(data, (e) => sourceError = e),
+        offset: offset,
         onProgress: (bytes) {
           watch.progress();
-          onProgress?.call(bytes);
+          onProgress?.call(offset + bytes);
         },
       );
       try {

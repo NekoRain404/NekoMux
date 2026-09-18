@@ -194,6 +194,10 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
   final Map<String, _HostQueue> _hosts = {};
   final Map<String, TransferCancelSignal> _running = {};
 
+  /// Tasks whose next attempt may continue from a partial file rather than
+  /// starting over. Filled by [retry] and drained when that attempt starts.
+  final Set<String> _resumeOnNextAttempt = {};
+
   /// Bytes reported since the last publication, waiting for the next one.
   /// 自上次发布以来报告的字节数，等待下一次发布。
   ///
@@ -370,6 +374,12 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
     final task = _taskById(id);
     if (task == null || !task.isTerminal) return;
     _pendingBytes.remove(id);
+    // Marked for one attempt only: a retry is the case where continuing from
+    // what the far side already holds is both possible and wanted. A *first*
+    // attempt must not resume — for an upload that would mean writing on top of
+    // a file the user asked to replace — and the runner's own guards would
+    // refuse it anyway, but saying so here is where the intent lives.
+    _resumeOnNextAttempt.add(id);
     _moveToEnd(
       id,
       (t) => t.copyWith(
@@ -521,10 +531,12 @@ class TransferQueueNotifier extends Notifier<List<TransferTask>> {
         return;
       }
 
+      final resume = _resumeOnNextAttempt.remove(task.id);
       final outcome = await runner.move(
         _taskById(task.id) ?? task,
         signal,
         (bytes) => _reportProgress(task.id, bytes),
+        resume: resume,
       );
       // From what the I/O did, not from the flag that asked it to stop. `_run`
       // holds `running` across the runner's `finally`, which is real file I/O —

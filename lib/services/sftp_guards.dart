@@ -232,9 +232,13 @@ class GuardedSftpWrite {
 /// so nothing else in the transfer loses its error handler to it.
 /// 只有写入器自己的监听器在那个 fork 出来的 zone 中运行——它是在这里创建的——因此传输
 /// 中其它任何东西都不会因此失去自己的错误处理器。
+/// [offset] starts the write that many bytes into the file — the resumed-upload
+/// case. dartssh2's writer takes its start position once, at construction, and
+/// has no seek; this is the only place it can be set.
 GuardedSftpWrite startGuardedSftpWrite(
   SftpFile file,
   Stream<Uint8List> source, {
+  int offset = 0,
   void Function(int bytesWritten)? onProgress,
 }) {
   final write = GuardedSftpWrite._();
@@ -245,7 +249,9 @@ GuardedSftpWrite startGuardedSftpWrite(
       },
     ),
   );
-  write.writer = zone.run(() => file.write(source, onProgress: onProgress));
+  write.writer = zone.run(
+    () => file.write(source, offset: offset, onProgress: onProgress),
+  );
   return write;
 }
 
