@@ -21,6 +21,7 @@ import 'console/ssh_error_text.dart';
 import 'snippet_injection_dialog.dart';
 import 'snippet_list_page.dart';
 import 'terminal/snippets_sheet.dart';
+import 'terminal/scrollback_search_sheet.dart';
 import 'terminal/terminal_theme.dart';
 
 /// Fallback terminal font size, used until the settings row has loaded and if
@@ -465,6 +466,14 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
       ),
       title: titleWidget,
       actions: [
+        // Searching the scrollback. There is no `grep` on a phone, and the
+        // alternative is scrolling a log by thumb until the eye catches
+        // something — which is what the user is doing when they want this.
+        IconButton(
+          icon: Icon(Icons.search, color: cs.secondary, size: 20),
+          tooltip: t('terminal_search'),
+          onPressed: _showSearch,
+        ),
         if (_hasSelection)
           IconButton(
             icon: Icon(Icons.copy, color: cs.secondary, size: 20),
@@ -593,6 +602,21 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
     if (!mounted) return;
     _terminal.paste(text);
     hapticIf(ref.read(settingsProvider).value?.hapticEnabled, HapticKind.light);
+  }
+
+  /// Hands the scrollback to the search, which asks and shows the answer.
+  ///
+  /// The buffer is read here because this is where the terminal is; everything
+  /// else about the search lives with the search. See [showScrollbackSearch] for
+  /// why it answers with a list rather than jumping to a line.
+  Future<void> _showSearch() {
+    // Indexed rather than iterated: xterm's buffer is a circular one, and it
+    // exposes `length` and `[]` rather than being an `Iterable`.
+    final buffer = _terminal.buffer.lines;
+    return showScrollbackSearch(
+      context,
+      lines: [for (var i = 0; i < buffer.length; i++) buffer[i].getText()],
+    );
   }
 
   void _copySelection() {
