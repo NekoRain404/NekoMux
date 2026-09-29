@@ -18,6 +18,8 @@ import 'containers/container_cards.dart';
 import 'containers/container_log_dialog.dart';
 import 'containers/docker_commands.dart';
 import 'containers/docker_container.dart';
+import 'containers/docker_run_spec.dart';
+import 'containers/new_container_page.dart';
 import 'containers/remote_action_outcome.dart';
 
 /// Real Docker container management page using SSH-based Docker commands.
@@ -426,6 +428,52 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
 
   /// Shows a dialog with real container logs fetched via SSH.
   /// 显示通过 SSH 获取的真实容器日志的对话框。
+  /// Asks for a new container's configuration, then creates it.
+  ///
+  /// The form returns a spec and the command is built from it by
+  /// `buildDockerRun` — which is where the quoting lives and where it is tested.
+  /// A failure is reported with the daemon's own words: `docker run` answers a
+  /// taken port or a missing image with a sentence that says exactly what to fix,
+  /// and replacing it with a generic message would throw that away.
+  Future<void> _createContainer() async {
+    final spec = await Navigator.push<DockerRunSpec>(
+      context,
+      MaterialPageRoute(builder: (_) => const NewContainerPage()),
+    );
+    if (spec == null || !mounted) return;
+
+    final plan = buildDockerRun(spec);
+    if (!plan.isOk) return; // the form already reported it
+
+    final ssh = _ssh;
+    if (ssh == null || ssh.state != SshConnectionState.connected) {
+      _showToast(t('ssh_not_connected'), isError: true);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final result = await ssh.runCommand(plan.command!);
+      final failure = remoteActionFailure(result);
+      if (!mounted) return;
+      if (failure != null) {
+        _showToast(
+          '${t('container_create_failed')}: $failure',
+          isError: true,
+        );
+        return;
+      }
+      _showToast(t('container_created'));
+      await _fetchContainers();
+    } catch (e) {
+      if (mounted) {
+        _showToast('${t('container_create_failed')}: $e', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   /// Opens a terminal running a shell inside [container].
   ///
   /// `docker exec -it <name> sh` over a PTY, on the same terminal page the host
@@ -495,6 +543,15 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          /// Creating a container is what a container manager is for, and the
+          /// form behind this icon is the only way to do it from the app.
+          /// 创建容器正是容器管理器存在的意义，而这个图标背后的表单是应用里唯一的
+          /// 创建入口。
+          IconButton(
+            icon: Icon(Icons.add_box_outlined, color: cs.secondary, size: 22),
+            tooltip: t('container_new'),
+            onPressed: _isLoading ? null : _createContainer,
+          ),
           /// Refresh action button. /// 刷新操作按钮。
           IconButton(
             icon: Icon(
