@@ -17,11 +17,13 @@ import '../../widgets/app_ui.dart';
 import 'docker_commands.dart';
 import 'docker_container.dart';
 
-/// Shows the container action sheet: start/stop/restart, logs, shell, remove.
+/// Shows the container action sheet: start/stop/restart, logs, open a shell,
+/// remove.
 /// 显示容器操作面板：启动/停止/重启、日志、Shell、删除。
 ///
 /// [onAction] runs a lifecycle action, [onRemove] asks for confirmation and then
-/// removes, and [onShowLogs] opens the log viewer. All three are invoked after
+/// removes, [onOpenShell] opens a terminal inside the container and
+/// [onShowLogs] opens the log viewer. All of them are invoked after
 /// the sheet has closed itself, so a dialog opened from one of them cannot end
 /// up underneath it.
 /// [onAction] 执行生命周期操作，[onRemove] 先确认再删除，[onShowLogs] 打开日志
@@ -45,6 +47,7 @@ void showContainerActionSheet(
   required void Function(DockerAction action) onAction,
   required VoidCallback onRemove,
   required VoidCallback onShowLogs,
+  required VoidCallback onOpenShell,
 }) {
   final cs = Theme.of(context).colorScheme;
   hapticIf(hapticsEnabled, HapticKind.light);
@@ -202,6 +205,39 @@ void showContainerActionSheet(
                 ),
                 onTap: () {
                   Navigator.pop(ctx);
+                  onOpenShell();
+                },
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.terminal,
+                      color: cs.onSurface.withValues(alpha: 0.6),
+                      size: 22,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        t('container_shell'),
+                        style: TextStyle(color: cs.onSurface, fontSize: 14),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      color: cs.onSurface.withValues(alpha: 0.6),
+                      size: 20,
+                    ),
+                  ],
+                ),
+              ),
+
+              AppCard(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
                   onShowLogs();
                 },
                 child: Row(
@@ -227,40 +263,6 @@ void showContainerActionSheet(
                 ),
               ),
 
-              AppCard(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                color: cs.onSurface.withValues(alpha: 0.04),
-                borderColor: Theme.of(
-                  context,
-                ).dividerColor.withValues(alpha: 0.5),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.terminal,
-                      color: cs.onSurface.withValues(alpha: 0.34),
-                      size: 22,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        t('container_shell'),
-                        style: TextStyle(
-                          color: cs.onSurface.withValues(alpha: 0.46),
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                    AppBadge(
-                      label: t('soon_badge'),
-                      color: cs.onSurface.withValues(alpha: 0.42),
-                    ),
-                  ],
-                ),
-              ),
 
               const SizedBox(height: 8),
             ],

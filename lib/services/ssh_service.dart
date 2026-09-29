@@ -305,11 +305,22 @@ class SshConnection implements ForwardOpener {
   /// can be closed after it, never before (see [_closeTargetThenBastion]).
   SSHClient? _jumpClient;
 
+  /// What to run in place of the interactive login shell, or null for one.
+  ///
+  /// A command session is how the app gets a shell *inside* something — a
+  /// container, most of all: `docker exec -it <name> sh` is an ordinary
+  /// command, and running it over a PTY is what a terminal on a laptop does.
+  /// Everything above this line is unchanged: same connection, same host-key
+  /// verification, same keepalive, same stream of output bytes. Only the last
+  /// step — what the channel asks the server to run — differs.
+  final String? initialCommand;
+
   /// Creates a new SSH connection for the given [host] and [credential].
   /// 使用给定的 [host] 和 [credential] 创建新的 SSH 连接。
   SshConnection({
     required this.host,
     required this.credential,
+    this.initialCommand,
     this.onHostKeyVerify,
     this.onHostKeyVerifyTyped,
     this.connectTimeout = defaultConnectTimeout,
@@ -599,8 +610,11 @@ class SshConnection implements ForwardOpener {
         return;
       }
 
+      // A PTY either way: without one there is no job control, no prompt line
+      // and no full-screen program — and `docker exec -it`, whose whole point is
+      // the `-t`, would fail outright.
       final session = await client.execute(
-        'exec \${SHELL:-/bin/sh} -l',
+        initialCommand ?? 'exec \${SHELL:-/bin/sh} -l',
         pty: SSHPtyConfig(width: 120, height: 40),
       );
 

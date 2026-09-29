@@ -145,6 +145,8 @@ const Map<String, String> ruStrings = <String, String>{
   'data': 'Данные',
   'host_detail': 'Сведения о хосте',
   'more_actions': 'Другие действия',
+  'disk_usage': 'Диск',
+  'disk_more_filesystems': 'ещё {0}',
   'resource_monitor': 'Монитор ресурсов',
   'function_modules': 'Функциональные модули',
   'empty_hosts': 'Хосты ещё не добавлены',
@@ -268,7 +270,7 @@ const Map<String, String> ruStrings = <String, String>{
   'restart': 'Перезапустить',
   'logs': 'Просмотр логов',
   'view_logs': 'Показать журнал',
-  'container_shell': 'Оболочка контейнера',
+  'container_shell': 'Открыть оболочку',
   'add_container': 'Добавить контейнер',
   'container_running': 'Запущен',
   'container_stopped': 'Остановлен',
@@ -277,8 +279,6 @@ const Map<String, String> ruStrings = <String, String>{
   'container_restart_success': 'Контейнер перезапущен',
   'container_remove_success': 'Контейнер удалён',
   'container_action_failed': 'Действие не выполнено',
-  'container_shell_coming_soon':
-      'Оболочка контейнера появится в следующей версии',
   'container_add_coming_soon':
       'Добавление контейнера появится в следующей версии',
   'ssh_not_connected': 'SSH не подключён',

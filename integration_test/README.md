@@ -84,6 +84,8 @@ and only run when asked for explicitly.
 | `batch_exec_test.dart` | one command on two real servers; each answers for itself, and neither a dead host nor a failing command stops the rest |
 | `jump_host_test.dart` | a target this phone cannot route to, reached through a bastion — with the premise asserted, so the test cannot stop proving anything |
 | `folder_download_test.dart` | a whole folder's tree reproduced on the device, file for file, with the empty directory reported |
+| `disk_probe_test.dart` | the `df` command and parser against a real server's own output, not a fixture |
+| `command_session_test.dart` | a PTY session running a command: its output, its input path, and that a plain session is still a login shell |
 
 | Test | What a failure means |
 | --- | --- |

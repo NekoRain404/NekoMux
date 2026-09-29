@@ -145,6 +145,8 @@ const Map<String, String> deStrings = <String, String>{
   'data': 'Daten',
   'host_detail': 'Host-Details',
   'more_actions': 'Weitere Aktionen',
+  'disk_usage': 'Speicher',
+  'disk_more_filesystems': '+{0} weitere',
   'resource_monitor': 'Ressourcenmonitor',
   'function_modules': 'Funktionsmodule',
   'empty_hosts': 'Noch keine Hosts hinzugefügt',
@@ -269,7 +271,7 @@ const Map<String, String> deStrings = <String, String>{
   'restart': 'Neustarten',
   'logs': 'Logs anzeigen',
   'view_logs': 'Protokoll anzeigen',
-  'container_shell': 'Container-Shell',
+  'container_shell': 'Shell öffnen',
   'add_container': 'Container hinzufügen',
   'container_running': 'Läuft',
   'container_stopped': 'Gestoppt',
@@ -278,8 +280,6 @@ const Map<String, String> deStrings = <String, String>{
   'container_restart_success': 'Container neugestartet',
   'container_remove_success': 'Container entfernt',
   'container_action_failed': 'Aktion fehlgeschlagen',
-  'container_shell_coming_soon':
-      'Container-Shell kommt in einer späteren Version',
   'container_add_coming_soon':
       'Container hinzufügen kommt in einer späteren Version',
   'ssh_not_connected': 'SSH nicht verbunden',

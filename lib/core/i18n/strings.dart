@@ -213,8 +213,6 @@ class AppStrings {
   static String get containerStopSuccess => get('container_stop_success');
   static String get containerRestartSuccess => get('container_restart_success');
   static String get containerRemoveSuccess => get('container_remove_success');
-  static String get containerShellComingSoon =>
-      get('container_shell_coming_soon');
   static String get containerAddComingSoon => get('container_add_coming_soon');
   static String get sshNotConnected => get('ssh_not_connected');
   static String get dockerNotInstalled => get('docker_not_installed');

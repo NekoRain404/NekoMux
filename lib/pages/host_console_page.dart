@@ -8,12 +8,14 @@ import '../core/i18n/strings.dart';
 import '../models/host.dart';
 import '../providers/providers.dart';
 import '../providers/ssh_provider.dart';
+import '../services/disk_usage.dart';
 import '../services/host_connection.dart';
 import '../services/known_hosts_store.dart';
 import '../services/monitoring_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/host_key_prompt.dart';
 import 'console/console_bars.dart';
+import 'console/disk_card.dart';
 import 'console/connect_outcome.dart';
 import 'console/console_function_grid.dart';
 import 'console/host_identity.dart';
@@ -84,6 +86,16 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
   /// CPU/RAM history handed to the chart.
   /// 交给图表的 CPU/RAM 历史。
   final MonitorSamples _samples = MonitorSamples();
+
+  /// The filesystems the last disk read found, fullest first.
+  List<DiskUsage> _filesystems = const [];
+
+  /// How many ticks have run, so the disk read can take a slower cadence: disk
+  /// changes on a scale of hours where CPU changes on a scale of seconds.
+  int _ticks = 0;
+
+  /// One disk read every this many ticks.
+  static const int _ticksPerDiskRead = 5;
 
   /// Which tick may run, which tick may still commit its result, and how many
   /// failures have piled up.
@@ -470,6 +482,20 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
       if (!_poll.isCurrent(ticket)) return false;
 
       _lastCpuTimes = sample.cpuTimes;
+
+      // Disk on a slower cadence, and its failure kept separate: a host whose
+      // `df` is missing or refused must not lose its CPU and memory charts over
+      // it — those came back fine, and they are the readings that are moving.
+      List<DiskUsage>? filesystems;
+      if (_ticks++ % _ticksPerDiskRead == 0) {
+        try {
+          filesystems = await probe.readDisk();
+        } on ProbeException {
+          filesystems = null;
+        }
+        if (!_poll.isCurrent(ticket)) return false;
+      }
+
       if (mounted) {
         setState(() {
           // What the panel shows, as measured: `cpuUsage` is null on the first
@@ -479,6 +505,9 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
           // null——没有上一份计数器快照可减——这份「无」就以「无」的形式传给面板。
           _latestCpu = sample.cpuUsage;
           _latestRam = sample.memoryUsage;
+          // Null means "this tick did not read the disk", which keeps the last
+          // known reading on screen rather than blanking the panel every tick.
+          if (filesystems != null) _filesystems = filesystems;
           _samples.commit(
             // No previous counter snapshot means no delta yet: the first CPU
             // point of a session is not measurable, so the *chart* keeps 0
@@ -682,6 +711,11 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
                 onCopy: _copyToClipboard,
               ),
             ),
+            // Disk sits above the CPU and RAM charts on purpose: those two are
+            // what a console always shows and the two that stay calm while a
+            // filesystem fills up and takes the machine down.
+            if (_filesystems.isNotEmpty)
+              SliverToBoxAdapter(child: DiskCard(filesystems: _filesystems)),
             SliverToBoxAdapter(
               child: ResourceMonitorCard(
                 glow: _glowController,

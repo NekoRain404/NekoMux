@@ -1,3 +1,4 @@
+import '../../services/disk_usage.dart';
 import '../../services/monitoring_service.dart';
 import 'probe_command.dart';
 
@@ -68,6 +69,15 @@ class ResourceProbe {
   /// 用于读取内存的命令。
   static const String memoryCommand = 'free -m';
 
+  /// The command used for disk usage.
+  ///
+  /// `-P` for the POSIX format (one line per filesystem, no wrapping) and `-k`
+  /// for kilobytes whatever the host's `DF_BLOCK_SIZE` is — see [parseDf] for
+  /// why both matter to a parser.
+  /// 用于读取磁盘占用的命令。`-P` 取 POSIX 格式（每个文件系统一行、不换行），`-k`
+  /// 固定为千字节而不管主机的 `DF_BLOCK_SIZE`——两者对解析器为何要紧，见 [parseDf]。
+  static const String diskCommand = 'df -Pk';
+
   /// Executes one command on the monitored host.
   /// 在被监控主机上执行一条命令。
   final ProbeRunner run;
@@ -82,6 +92,27 @@ class ResourceProbe {
   /// 有意长于轮询周期：慢链路可以慢慢来（轮询循环会跳过在途期间的 tick），但停止
   /// 应答的服务器不能被无限等待。
   final Duration timeout;
+
+  /// Reads the mounted filesystems, fullest first.
+  ///
+  /// Separate from [read] rather than folded into it: disk changes on a scale of
+  /// hours where CPU changes on a scale of seconds, and a sample every tick
+  /// would spend a third of the poll's traffic on a number that has not moved.
+  /// The page calls this on a slower cadence for that reason.
+  ///
+  /// Throws [ProbeException] for the same reason [read] does — a `df` that
+  /// failed is not a host with no filesystems.
+  Future<List<DiskUsage>> readDisk() async {
+    final result = await probeCommand(run, diskCommand, timeout: timeout);
+    final filesystems = byFullness(parseDf(result.stdout));
+    if (filesystems.isEmpty) {
+      throw ProbeException(
+        ProbeFailure.failed,
+        '$diskCommand: ${describeOutput(result.stdout)}',
+      );
+    }
+    return filesystems;
+  }
 
   /// Takes one sample. [previous] is the counter snapshot of the previous
   /// sample, or null for the first one.

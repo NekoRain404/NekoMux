@@ -66,6 +66,8 @@ SshConnection buildHostConnection({
   required Database db,
   required Duration connectTimeout,
   JumpRoute? jump,
+  /// Runs instead of an interactive login shell; see [SshConnection.initialCommand].
+  String? initialCommand,
   required Future<bool> Function(String fingerprint, HostKeyVerdict verdict)
   onPrompt,
   bool refuseUntrusted = false,
@@ -92,6 +94,7 @@ SshConnection buildHostConnection({
     host: host,
     credential: credential,
     connectTimeout: connectTimeout,
+    initialCommand: initialCommand,
     onHostKeyVerifyTyped: verifierFor(host),
     jumpHost: jump?.host,
     jumpCredential: jump?.credential,

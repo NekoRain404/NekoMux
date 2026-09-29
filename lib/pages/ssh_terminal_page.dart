@@ -33,7 +33,26 @@ const double _kDefaultTerminalFontSize = 13;
 /// SSH terminal page with interactive terminal emulator.
 class SshTerminalPage extends ConsumerStatefulWidget {
   final Host host;
-  const SshTerminalPage({super.key, required this.host});
+
+  /// What to run instead of an interactive login shell, or null for one.
+  ///
+  /// Used to get a shell inside something — `docker exec -it <name> sh` — over
+  /// this same page, with the same host-key verification, keepalive and output
+  /// handling. Reconnecting re-runs the command, which is what a user asking
+  /// for a container shell again wants.
+  final String? command;
+
+  /// What the command is, for the app bar: a container name, say. Shown beside
+  /// the host so a session is never mistaken for a login shell on the host
+  /// itself — running `rm -rf` in the wrong one of those is unrecoverable.
+  final String? commandLabel;
+
+  const SshTerminalPage({
+    super.key,
+    required this.host,
+    this.command,
+    this.commandLabel,
+  });
 
   @override
   ConsumerState<SshTerminalPage> createState() => _SshTerminalPageState();
@@ -148,6 +167,7 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
       final connection = buildHostConnection(
         host: host,
         credential: cred,
+        initialCommand: widget.command,
         db: db,
         connectTimeout: ref.read(connectTimeoutProvider),
         jump: jumpRouteFor(
@@ -421,8 +441,12 @@ class _SshTerminalPageState extends ConsumerState<SshTerminalPage> {
           ],
         );
       default:
+        // The command label comes before the host: a container shell must never
+        // read as a login shell on the host itself.
         titleWidget = Text(
-          '${host.alias} (SSH)',
+          widget.commandLabel == null
+              ? '${host.alias} (SSH)'
+              : '${widget.commandLabel} · ${host.alias}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: AppFonts.monoText(color: cs.onSurface, fontSize: 14),

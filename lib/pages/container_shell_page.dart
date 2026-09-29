@@ -12,6 +12,7 @@ import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 import '../widgets/host_key_prompt.dart';
 import 'console/ssh_error_text.dart';
+import 'ssh_terminal_page.dart';
 import 'containers/container_action_sheet.dart';
 import 'containers/container_cards.dart';
 import 'containers/container_log_dialog.dart';
@@ -362,6 +363,7 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
       onAction: (action) => _runDockerAction(action, container),
       onRemove: () => _confirmRemoveContainer(container),
       onShowLogs: () => _showLogs(container),
+      onOpenShell: () => _openContainerShell(container),
     );
   }
 
@@ -424,6 +426,32 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
 
   /// Shows a dialog with real container logs fetched via SSH.
   /// 显示通过 SSH 获取的真实容器日志的对话框。
+  /// Opens a terminal running a shell inside [container].
+  ///
+  /// `docker exec -it <name> sh` over a PTY, on the same terminal page the host
+  /// gets — so the container shell has everything that page has: the quick keys,
+  /// paste, snippets, the key verification that opened this host at all. The
+  /// `sh` rather than `bash` because a minimal image may not have bash, and a
+  /// shell that is not there is a failure the user reads in the terminal rather
+  /// than a feature that silently does nothing.
+  ///
+  /// Not verified end to end here: the test fixture has no Docker daemon, so
+  /// what IS verified is the mechanism — a PTY session running a command, on a
+  /// real server (see integration_test/command_session_test.dart). The command
+  /// itself is one line, and a host without Docker says so in the terminal.
+  void _openContainerShell(DockerContainer container) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SshTerminalPage(
+          host: widget.host,
+          command: 'docker exec -it ${container.name} sh',
+          commandLabel: container.name,
+        ),
+      ),
+    );
+  }
+
   Future<void> _showLogs(DockerContainer container) => showContainerLogsDialog(
     context,
     containerName: container.name,
