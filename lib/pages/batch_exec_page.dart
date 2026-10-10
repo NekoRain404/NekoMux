@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,9 @@ import 'package:sqflite/sqflite.dart';
 import '../services/batch_runner.dart';
 import '../services/host_connection.dart';
 import '../services/command_result.dart';
+import '../services/host_key_trust.dart';
+import '../services/sftp_batch_session.dart';
+import '../services/sftp_service.dart';
 import '../services/ssh_service.dart';
 import '../widgets/app_ui.dart';
 
@@ -39,10 +43,21 @@ class BatchExecPage extends ConsumerStatefulWidget {
 
 class _BatchExecPageState extends ConsumerState<BatchExecPage> {
   final _commandController = TextEditingController();
+  final _remotePathController = TextEditingController();
   final _selected = <String>{};
   BatchRunner? _runner;
   List<BatchHostResult> _results = const [];
   bool _isRunning = false;
+
+  /// Whether this batch sends a file rather than running a command.
+  ///
+  /// Both live on one page because everything around the work is identical:
+  /// the hosts are chosen once, the results come back in the same cards, and
+  /// the cancel is the same cancel. Only the middle row differs.
+  bool _sendFile = false;
+
+  /// The local file to send, or null until one is chosen.
+  String? _localPath;
 
   @override
   void initState() {
@@ -56,6 +71,7 @@ class _BatchExecPageState extends ConsumerState<BatchExecPage> {
   void dispose() {
     _runner?.cancel();
     _commandController.dispose();
+    _remotePathController.dispose();
     super.dispose();
   }
 
@@ -80,10 +96,63 @@ class _BatchExecPageState extends ConsumerState<BatchExecPage> {
     );
   }
 
+  /// Builds the session factory a file transfer uses.
+  ///
+  /// A transfer needs SFTP and nothing else, so it gets its own session type
+  /// rather than the command one — see [BatchTransferSession].
+  ///
+  /// The verifier is wired as the SFTP page wires it, since accepted keys live
+  /// in SQLite, but its prompt refuses. Asking once per host would be a modal
+  /// storm, and accepting a key on the user's behalf is the one thing this app
+  /// never does; a key it does not already trust therefore fails that host,
+  /// exactly as it does for a command batch.
+  BatchTransferSessionFactory _transferSessionFactory(
+    Duration connectTimeout,
+    Database db,
+  ) {
+    return (host, credential) => SftpBatchSession(
+      SftpService(
+        host: host,
+        credential: credential,
+        connectTimeout: connectTimeout,
+        onHostKeyVerify: buildHostKeyVerifier(
+          db: db,
+          address: host.ipAddress,
+          port: host.port,
+          onPrompt: (_, _) async => false,
+        ),
+      ),
+    );
+  }
+
+  /// Asks the user for the local file to send.
+  ///
+  /// One file, not several: a batch is defined by going to *many hosts*, and
+  /// letting each host take a different file would turn one batch into a matrix
+  /// the result cards cannot express.
+  Future<void> _pickFile() async {
+    final files = await FilePicker.pickFiles();
+    if (files.isEmpty) return;
+    final path = files.first.path;
+    if (!mounted || path == null || path.isEmpty) return;
+    setState(() => _localPath = path);
+  }
+
   Future<void> _run(List<Host> hosts) async {
     if (_isRunning) return;
+
     final command = _commandController.text.trim();
-    if (command.isEmpty || _selected.isEmpty) return;
+    final localPath = _localPath;
+    final remotePath = _remotePathController.text.trim();
+
+    // Whichever mode is showing, there has to be something to send and
+    // somewhere to send it before starting is worth doing.
+    if (_selected.isEmpty) return;
+    if (_sendFile) {
+      if (localPath == null || remotePath.isEmpty) return;
+    } else if (command.isEmpty) {
+      return;
+    }
 
     final targets = [
       for (final host in hosts)
@@ -109,17 +178,30 @@ class _BatchExecPageState extends ConsumerState<BatchExecPage> {
       _results = const [];
     });
 
-    await runner.run(
-      hosts: targets,
-      command: command,
-      sessionFor: _sessionFactory(
-        ref.read(connectTimeoutProvider),
-        db,
-        hosts: hosts,
-        credentials: credentials,
-      ),
-      credentialFor: (host) => byId[host.credentialId],
-    );
+    if (_sendFile) {
+      await runner.transfer(
+        hosts: targets,
+        localPath: localPath!,
+        remotePath: remotePath,
+        sessionFor: _transferSessionFactory(
+          ref.read(connectTimeoutProvider),
+          db,
+        ),
+        credentialFor: (host) => byId[host.credentialId],
+      );
+    } else {
+      await runner.run(
+        hosts: targets,
+        command: command,
+        sessionFor: _sessionFactory(
+          ref.read(connectTimeoutProvider),
+          db,
+          hosts: hosts,
+          credentials: credentials,
+        ),
+        credentialFor: (host) => byId[host.credentialId],
+      );
+    }
 
     if (mounted) setState(() => _isRunning = false);
   }
@@ -192,29 +274,88 @@ class _BatchExecPageState extends ConsumerState<BatchExecPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TextField(
-                controller: _commandController,
-                enabled: !_isRunning,
-                maxLines: 3,
-                minLines: 1,
-                style: TextStyle(
-                  color: cs.onSurface,
-                  fontFamily: AppFonts.mono,
-                  fontSize: 13,
-                ),
-                decoration: InputDecoration(
-                  hintText: t('batch_command_hint'),
-                  hintStyle: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.42),
+              SegmentedButton<bool>(
+                segments: [
+                  ButtonSegment(
+                    value: false,
+                    label: Text(t('batch_mode_command')),
+                    icon: const Icon(Icons.terminal, size: 16),
                   ),
-                  filled: true,
-                  fillColor: cs.surface,
-                  border: const OutlineInputBorder(),
-                ),
-                // Submitted from the keyboard runs the batch, since the field is
-                // the only thing the user came here to fill in.
-                onSubmitted: (_) => _run(hosts),
+                  ButtonSegment(
+                    value: true,
+                    label: Text(t('batch_mode_file')),
+                    icon: const Icon(Icons.upload_file, size: 16),
+                  ),
+                ],
+                selected: {_sendFile},
+                showSelectedIcon: false,
+                onSelectionChanged: _isRunning
+                    ? null
+                    : (selection) =>
+                          setState(() => _sendFile = selection.first),
               ),
+              const SizedBox(height: 10),
+              if (_sendFile) ...[
+                OutlinedButton.icon(
+                  onPressed: _isRunning ? null : _pickFile,
+                  icon: const Icon(Icons.folder_open, size: 18),
+                  label: Text(
+                    _localPath == null
+                        ? t('batch_choose_file')
+                        : _localPath!.split('/').last,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: cs.secondary,
+                    side: BorderSide(color: cs.secondary),
+                    minimumSize: const Size.fromHeight(42),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _remotePathController,
+                  enabled: !_isRunning,
+                  style: TextStyle(
+                    color: cs.onSurface,
+                    fontFamily: AppFonts.mono,
+                    fontSize: 13,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: t('batch_remote_path_hint'),
+                    hintStyle: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.42),
+                    ),
+                    filled: true,
+                    fillColor: cs.surface,
+                    border: const OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => _run(hosts),
+                ),
+              ] else
+                TextField(
+                  controller: _commandController,
+                  enabled: !_isRunning,
+                  maxLines: 3,
+                  minLines: 1,
+                  style: TextStyle(
+                    color: cs.onSurface,
+                    fontFamily: AppFonts.mono,
+                    fontSize: 13,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: t('batch_command_hint'),
+                    hintStyle: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.42),
+                    ),
+                    filled: true,
+                    fillColor: cs.surface,
+                    border: const OutlineInputBorder(),
+                  ),
+                  // Submitted from the keyboard runs the batch, since the field is
+                  // the only thing the user came here to fill in.
+                  onSubmitted: (_) => _run(hosts),
+                ),
               const SizedBox(height: 10),
               Row(
                 children: [
