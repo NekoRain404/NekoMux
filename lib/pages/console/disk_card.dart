@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/format/bytes.dart';
 import '../../core/i18n/strings.dart';
 import '../../core/theme/app_fonts.dart';
 import '../../services/disk_usage.dart';
@@ -32,7 +33,19 @@ class DiskCard extends StatelessWidget {
   /// How many to draw. The rest are counted, not hidden silently.
   final int maxRows;
 
-  const DiskCard({super.key, required this.filesystems, this.maxRows = 3});
+  /// Called when a filesystem is tapped, to show what is using its space.
+  ///
+  /// Null leaves the rows inert, which is what a caller with no session to
+  /// scan over should pass — a chevron that opens nothing is worse than no
+  /// chevron.
+  final void Function(DiskUsage filesystem)? onTap;
+
+  const DiskCard({
+    super.key,
+    required this.filesystems,
+    this.maxRows = 3,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +87,14 @@ class DiskCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           for (final filesystem in shown) ...[
-            _DiskRow(filesystem: filesystem),
+            if (onTap == null)
+              _DiskRow(filesystem: filesystem)
+            else
+              InkWell(
+                onTap: () => onTap!(filesystem),
+                borderRadius: BorderRadius.circular(6),
+                child: _DiskRow(filesystem: filesystem, tappable: true),
+              ),
             if (filesystem != shown.last) const SizedBox(height: 10),
           ],
         ],
@@ -87,7 +107,10 @@ class DiskCard extends StatelessWidget {
 class _DiskRow extends StatelessWidget {
   final DiskUsage filesystem;
 
-  const _DiskRow({required this.filesystem});
+  /// Whether to draw the chevron that says this row opens something.
+  final bool tappable;
+
+  const _DiskRow({required this.filesystem, this.tappable = false});
 
   @override
   Widget build(BuildContext context) {
@@ -123,8 +146,8 @@ class _DiskRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              '${_humanSize(filesystem.usedBytes)} / '
-              '${_humanSize(filesystem.totalBytes)}',
+              '${formatBytes(filesystem.usedBytes)} / '
+              '${formatBytes(filesystem.totalBytes)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -144,6 +167,14 @@ class _DiskRow extends StatelessWidget {
                 fontFamily: AppFonts.mono,
               ),
             ),
+            if (tappable) ...[
+              const SizedBox(width: 2),
+              Icon(
+                Icons.chevron_right,
+                size: 15,
+                color: cs.onSurface.withValues(alpha: 0.35),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 4),
@@ -162,18 +193,4 @@ class _DiskRow extends StatelessWidget {
       ],
     );
   }
-}
-
-/// Bytes in the unit a person reads, with one decimal.
-String _humanSize(int bytes) {
-  const units = ['B', 'K', 'M', 'G', 'T'];
-  var value = bytes.toDouble();
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return unit == 0
-      ? '${value.toInt()}${units[unit]}'
-      : '${value.toStringAsFixed(1)}${units[unit]}';
 }

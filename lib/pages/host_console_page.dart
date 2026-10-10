@@ -16,6 +16,7 @@ import '../services/ssh_service.dart';
 import '../widgets/host_key_prompt.dart';
 import 'console/console_bars.dart';
 import 'console/disk_card.dart';
+import 'console/disk_scan_page.dart';
 import 'console/connect_outcome.dart';
 import 'console/console_function_grid.dart';
 import 'console/host_identity.dart';
@@ -681,6 +682,24 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
     await _initMonitoring();
   }
 
+  /// Opens the space explorer for one filesystem.
+  ///
+  /// The view is handed a loader rather than the connection: this State is the
+  /// object holding the session, and the scan view is a view.
+  void _openDiskScan(DiskUsage filesystem) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DiskScanPage(
+          path: filesystem.mountPoint,
+          // Read at scan time, not captured now, so a rescan after a reconnect
+          // uses the session that exists then.
+          load: (path) => loadDiskScan(_monitorConn, path),
+        ),
+      ),
+    );
+  }
+
   // ===========================================================================
   // Build
   // ===========================================================================
@@ -715,7 +734,12 @@ class _HostConsolePageState extends ConsumerState<HostConsolePage>
             // what a console always shows and the two that stay calm while a
             // filesystem fills up and takes the machine down.
             if (_filesystems.isNotEmpty)
-              SliverToBoxAdapter(child: DiskCard(filesystems: _filesystems)),
+              SliverToBoxAdapter(
+                child: DiskCard(
+                  filesystems: _filesystems,
+                  onTap: _openDiskScan,
+                ),
+              ),
             SliverToBoxAdapter(
               child: ResourceMonitorCard(
                 glow: _glowController,
