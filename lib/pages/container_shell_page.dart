@@ -23,6 +23,7 @@ import 'containers/container_log_dialog.dart';
 import 'containers/container_states.dart';
 import 'containers/docker_commands.dart';
 import 'containers/docker_container.dart';
+import 'containers/docker_images_page.dart';
 import 'containers/docker_run_spec.dart';
 import 'containers/docker_stats.dart';
 import 'containers/new_container_page.dart';
@@ -612,6 +613,21 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
             icon: Icon(Icons.add_box_outlined, color: cs.secondary, size: 22),
             tooltip: t('container_new'),
             onPressed: _isLoading ? null : _createContainer,
+          ),
+          /// The images containers are built from — where the space on a full
+          /// disk has usually gone, and nowhere the app could look until now.
+          /// 容器所基于的镜像——磁盘写满时空间通常去了哪里，此前应用无从查看。
+          IconButton(
+            icon: Icon(Icons.layers_outlined, color: cs.secondary, size: 22),
+            tooltip: t('docker_images'),
+            onPressed: _isLoading
+                ? null
+                : () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DockerImagesPage(ssh: _ssh),
+                    ),
+                  ),
           ),
           /// Refresh action button. /// 刷新操作按钮。
           IconButton(
