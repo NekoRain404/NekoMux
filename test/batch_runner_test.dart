@@ -52,6 +52,41 @@ class _FakeSession implements BatchSession {
   void dispose() => disposed = true;
 }
 
+/// A transfer session that records what it was asked to upload.
+class _FakeTransferSession implements BatchTransferSession {
+  _FakeTransferSession(this.host, {this.failUpload = false});
+
+  final Host host;
+
+  /// When set, [putFile] throws — one host's upload failing on its own.
+  final bool failUpload;
+
+  @override
+  bool trustRefused = false;
+
+  var connectCalls = 0;
+  var disposed = false;
+  final uploads = <String>[];
+
+  @override
+  Future<void> connect() async {
+    connectCalls++;
+  }
+
+  @override
+  Future<CommandResult> run(String command) =>
+      throw UnsupportedError('a transfer session does not run commands');
+
+  @override
+  Future<void> putFile(String localPath, String remotePath) async {
+    if (failUpload) throw Exception('upload failed');
+    uploads.add('$localPath -> $remotePath');
+  }
+
+  @override
+  void dispose() => disposed = true;
+}
+
 Host hostAt(int i) => Host(
   id: 'h$i',
   alias: 'host$i',
@@ -314,5 +349,80 @@ void main() {
     gate.complete();
     await first;
     expect(r.results, hasLength(1));
+  });
+
+  group('transferring a file', () {
+    test('uploads the same file to every host, and reports each', () async {
+      // The batch's whole point: the file is chosen once and the destination
+      // typed once, however many hosts it goes to.
+      final sessions = <String, _FakeTransferSession>{};
+      final hosts = [hostAt(1), hostAt(2), hostAt(3)];
+
+      final r = runner();
+      await r.transfer(
+        hosts: hosts,
+        localPath: '/tmp/nginx.conf',
+        remotePath: '/etc/nginx/nginx.conf',
+        sessionFor: (host, _) =>
+            sessions[host.id] = _FakeTransferSession(host),
+        credentialFor: (_) => credential,
+      );
+
+      expect(sessions, hasLength(3));
+      for (final session in sessions.values) {
+        expect(session.uploads, ['/tmp/nginx.conf -> /etc/nginx/nginx.conf']);
+        expect(
+          session.disposed,
+          isTrue,
+          reason: 'every session must be released, error paths included',
+        );
+      }
+      expect(
+        r.results.map((x) => x.status),
+        everyElement(BatchStatus.succeeded),
+      );
+    });
+
+    test('one host failing to upload does not stop the others', () async {
+      final hosts = [hostAt(1), hostAt(2), hostAt(3)];
+      final r = runner();
+
+      await r.transfer(
+        hosts: hosts,
+        localPath: '/tmp/nginx.conf',
+        remotePath: '/etc/nginx/nginx.conf',
+        sessionFor: (host, _) =>
+            _FakeTransferSession(host, failUpload: host.id == 'h2'),
+        credentialFor: (_) => credential,
+      );
+
+      expect(r.results[0].status, BatchStatus.succeeded);
+      expect(r.results[1].status, BatchStatus.unreachable);
+      expect(r.results[2].status, BatchStatus.succeeded);
+    });
+
+    test('a host with no credential is reported without being dialled', () async {
+      final sessions = <String, _FakeTransferSession>{};
+      final hosts = [hostAt(1), hostAt(2)];
+      final r = runner();
+
+      await r.transfer(
+        hosts: hosts,
+        localPath: '/tmp/nginx.conf',
+        remotePath: '/etc/nginx/nginx.conf',
+        sessionFor: (host, _) =>
+            sessions[host.id] = _FakeTransferSession(host),
+        credentialFor: (host) => host.id == 'h1' ? null : credential,
+      );
+
+      expect(r.results[0].status, BatchStatus.unreachable);
+      expect(r.results[0].error, 'no_credential');
+      expect(
+        sessions.containsKey('h1'),
+        isFalse,
+        reason: 'a host with nothing to authenticate with must not be dialled',
+      );
+      expect(r.results[1].status, BatchStatus.succeeded);
+    });
   });
 }

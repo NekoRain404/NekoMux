@@ -118,6 +118,23 @@ abstract class BatchSession {
 typedef BatchSessionFactory =
     BatchSession Function(Host host, Credential credential);
 
+/// A session that can also move files.
+///
+/// Deliberately a *subtype* rather than a wider [BatchSession]. A session that
+/// runs commands has nothing sensible to do when asked to upload, and putting
+/// `putFile` on the base would force every implementer — including the fakes the
+/// tests run on — to write a method they cannot honour. The implementers use
+/// `implements`, so a throwing default would never be inherited anyway and would
+/// only mislead. Here the type says which batch a session may be handed to.
+abstract class BatchTransferSession implements BatchSession {
+  /// Copies the local file at [localPath] to [remotePath] on the host.
+  Future<void> putFile(String localPath, String remotePath);
+}
+
+/// Builds a transfer session for one host, using [credential].
+typedef BatchTransferSessionFactory =
+    BatchTransferSession Function(Host host, Credential credential);
+
 /// Runs one command across many hosts, with a bounded number in flight.
 ///
 /// The whole point is that the user types the command once: on a phone, a
@@ -171,6 +188,69 @@ class BatchRunner {
     required String command,
     required BatchSessionFactory sessionFor,
     required Credential? Function(Host host) credentialFor,
+  }) => _fanOut(
+    hosts: hosts,
+    sessionFor: sessionFor,
+    credentialFor: credentialFor,
+    work: (host, session, started) async {
+      final result = await session.run(command);
+      return BatchHostResult(
+        host: host,
+        status: result.ok ? BatchStatus.succeeded : BatchStatus.failed,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        duration: DateTime.now().difference(started),
+      );
+    },
+  );
+
+  /// Copies one local file to many hosts.
+  ///
+  /// The same fan-out as [run] with an upload in place of a command. On a phone
+  /// this is the difference between deploying a config to five servers and
+  /// typing the same `scp` five times on a soft keyboard.
+  ///
+  /// The local file is opened once per host rather than once for the batch:
+  /// each upload needs its own stream, and buffering the whole file to avoid
+  /// re-reading it is how a phone runs out of memory on the one file large
+  /// enough to matter.
+  Future<void> transfer({
+    required List<Host> hosts,
+    required String localPath,
+    required String remotePath,
+    required BatchTransferSessionFactory sessionFor,
+    required Credential? Function(Host host) credentialFor,
+  }) => _fanOut(
+    hosts: hosts,
+    sessionFor: sessionFor,
+    credentialFor: credentialFor,
+    work: (host, session, started) async {
+      await session.putFile(localPath, remotePath);
+      return BatchHostResult(
+        host: host,
+        status: BatchStatus.succeeded,
+        duration: DateTime.now().difference(started),
+      );
+    },
+  );
+
+  /// Runs [work] against every host, with a bounded number in flight.
+  ///
+  /// The shape lives here rather than in either caller because it is the part
+  /// that is easy to get subtly wrong — the queue, the bound, one host's failure
+  /// staying its own, and the difference between cancelling a host that has not
+  /// started and one that is already running. Only the work differs between a
+  /// command and a file, so only the work is passed in.
+  Future<void> _fanOut<S extends BatchSession>({
+    required List<Host> hosts,
+    required S Function(Host host, Credential credential) sessionFor,
+    required Credential? Function(Host host) credentialFor,
+    required Future<BatchHostResult> Function(
+      Host host,
+      S session,
+      DateTime started,
+    ) work,
   }) async {
     if (_running) return;
     _running = true;
@@ -213,22 +293,11 @@ class BatchRunner {
         final started = DateTime.now();
         try {
           await session.connect();
-          final result = await session.run(command);
-          // Published even if the user cancelled while it was running: the
-          // command did execute on that server, and reporting it as cancelled
-          // would hide output the user asked for and cannot get back. Cancel
-          // stops hosts that have not run yet; it cannot un-run one.
-          _publish(
-            index,
-            BatchHostResult(
-              host: host,
-              status: result.ok ? BatchStatus.succeeded : BatchStatus.failed,
-              exitCode: result.exitCode,
-              stdout: result.stdout,
-              stderr: result.stderr,
-              duration: DateTime.now().difference(started),
-            ),
-          );
+          // Published even if the user cancelled while it was running: the work
+          // did happen on that server, and reporting it as cancelled would hide
+          // a result the user asked for and cannot get back. Cancel stops hosts
+          // that have not run yet; it cannot un-run one.
+          _publish(index, await work(host, session, started));
         } catch (e) {
           if (_cancelled) continue;
           _publish(
