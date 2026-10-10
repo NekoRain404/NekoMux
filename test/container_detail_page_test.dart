@@ -205,18 +205,4 @@ void main() {
 
     expect(find.text('Unlimited'), findsWidgets);
   });
-
-  test('the byte formatter reads the way a person would say it', () {
-    expect(formatBytes(0), 'Unlimited');
-    expect(formatBytes(512), '512 B');
-    expect(formatBytes(1024), '1.0 KiB');
-    expect(formatBytes(1073741824), '1.0 GiB');
-    expect(formatBytes(2147483648), '2.0 GiB');
-    expect(
-      formatBytes(1572864),
-      '1.5 MiB',
-      reason: 'a limit is rarely a round number of bytes; losing the fraction '
-          'would turn 1.5 GiB into 1.5 GiB reported as 1',
-    );
-  });
 }

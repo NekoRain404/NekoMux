@@ -13,6 +13,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/format/bytes.dart';
 import '../../core/theme/app_fonts.dart';
 import '../../core/i18n/strings.dart';
 import '../../widgets/app_ui.dart';
@@ -651,22 +652,6 @@ String _healthLabel(String health) => switch (health) {
   'starting' => t('container_starting'),
   _ => health,
 };
-
-/// A byte count in the units a person reads.
-String formatBytes(int bytes) {
-  if (bytes <= 0) return t('container_unlimited');
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  var value = bytes.toDouble();
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  final text = value >= 100 || unit == 0
-      ? value.toStringAsFixed(0)
-      : value.toStringAsFixed(1);
-  return '$text ${units[unit]}';
-}
 
 String _two(int value) => value.toString().padLeft(2, '0');
 

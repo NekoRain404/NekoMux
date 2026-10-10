@@ -1,3 +1,5 @@
+import '../../services/shell_quote.dart';
+
 /// What the user asked to create, before it becomes a command line.
 ///
 /// Every field is a string because that is what a form produces, and because
@@ -96,7 +98,7 @@ DockerRunPlan buildDockerRun(DockerRunSpec spec) {
 
   final name = spec.name.trim();
   if (name.isNotEmpty) {
-    final safe = _quote(name);
+    final safe = shellQuote(name);
     if (safe == null) {
       return DockerRunPlan.bad(DockerRunProblem.unsafeValue, name);
     }
@@ -109,7 +111,7 @@ DockerRunPlan buildDockerRun(DockerRunSpec spec) {
     if (!_isPair(trimmed)) {
       return DockerRunPlan.bad(DockerRunProblem.malformedPair, trimmed);
     }
-    parts.addAll(['-p', _quote(trimmed)!]);
+    parts.addAll(['-p', shellQuote(trimmed)!]);
   }
 
   for (final volume in spec.volumes) {
@@ -118,7 +120,7 @@ DockerRunPlan buildDockerRun(DockerRunSpec spec) {
     if (!_isPair(trimmed)) {
       return DockerRunPlan.bad(DockerRunProblem.malformedPair, trimmed);
     }
-    parts.addAll(['-v', _quote(trimmed)!]);
+    parts.addAll(['-v', shellQuote(trimmed)!]);
   }
 
   for (final entry in spec.environment) {
@@ -130,7 +132,7 @@ DockerRunPlan buildDockerRun(DockerRunSpec spec) {
     if (equals <= 0) {
       return DockerRunPlan.bad(DockerRunProblem.malformedPair, trimmed);
     }
-    parts.addAll(['-e', _quote(trimmed)!]);
+    parts.addAll(['-e', shellQuote(trimmed)!]);
   }
 
   const policies = {'no', 'on-failure', 'always', 'unless-stopped'};
@@ -139,7 +141,7 @@ DockerRunPlan buildDockerRun(DockerRunSpec spec) {
     parts.addAll(['--restart', policy]);
   }
 
-  final quotedImage = _quote(image);
+  final quotedImage = shellQuote(image);
   if (quotedImage == null) {
     return DockerRunPlan.bad(DockerRunProblem.unsafeValue, image);
   }
@@ -156,19 +158,6 @@ DockerRunPlan buildDockerRun(DockerRunSpec spec) {
   }
 
   return DockerRunPlan.ok(parts.join(' '));
-}
-
-/// [value] quoted as one shell argument, or null when it cannot be.
-///
-/// Null for a newline or a NUL: a POSIX shell cannot put either inside single
-/// quotes, and there is no safe way to pass one through this path. Refusing is
-/// the honest answer — silently dropping the character would run a different
-/// command from the one the user described.
-String? _quote(String value) {
-  if (value.contains('\n') || value.contains('\r') || value.contains('\x00')) {
-    return null;
-  }
-  return "'${value.replaceAll("'", r"'\''")}'";
 }
 
 /// Whether [value] looks like a `a:b` pair — a port mapping or a mount.
