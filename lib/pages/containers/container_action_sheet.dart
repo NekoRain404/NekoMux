@@ -22,8 +22,9 @@ import 'docker_container.dart';
 /// 显示容器操作面板：启动/停止/重启、日志、Shell、删除。
 ///
 /// [onAction] runs a lifecycle action, [onRemove] asks for confirmation and then
-/// removes, [onOpenShell] opens a terminal inside the container and
-/// [onShowLogs] opens the log viewer. All of them are invoked after
+/// removes, [onOpenShell] opens a terminal inside the container,
+/// [onShowLogs] opens the log viewer and [onShowDetail] opens the full
+/// `docker inspect` view. All of them are invoked after
 /// the sheet has closed itself, so a dialog opened from one of them cannot end
 /// up underneath it.
 /// [onAction] 执行生命周期操作，[onRemove] 先确认再删除，[onShowLogs] 打开日志
@@ -48,6 +49,7 @@ void showContainerActionSheet(
   required VoidCallback onRemove,
   required VoidCallback onShowLogs,
   required VoidCallback onOpenShell,
+  required VoidCallback onShowDetail,
 }) {
   final cs = Theme.of(context).colorScheme;
   hapticIf(hapticsEnabled, HapticKind.light);
@@ -197,72 +199,32 @@ void showContainerActionSheet(
 
               Divider(height: 32, color: Theme.of(context).dividerColor),
 
-              AppCard(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
+              _SheetRow(
+                icon: Icons.info_outline,
+                label: t('container_details'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onShowDetail();
+                },
+              ),
+
+              _SheetRow(
+                icon: Icons.terminal,
+                label: t('container_shell'),
                 onTap: () {
                   Navigator.pop(ctx);
                   onOpenShell();
                 },
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.terminal,
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                      size: 22,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        t('container_shell'),
-                        style: TextStyle(color: cs.onSurface, fontSize: 14),
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right,
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                      size: 20,
-                    ),
-                  ],
-                ),
               ),
 
-              AppCard(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
+              _SheetRow(
+                icon: Icons.article_outlined,
+                label: t('logs'),
                 onTap: () {
                   Navigator.pop(ctx);
                   onShowLogs();
                 },
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.article_outlined,
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                      size: 22,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        t('logs'),
-                        style: TextStyle(color: cs.onSurface, fontSize: 14),
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right,
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                      size: 20,
-                    ),
-                  ],
-                ),
               ),
-
 
               const SizedBox(height: 8),
             ],
@@ -331,6 +293,53 @@ class _ActionButton extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// One full-width row in the sheet: an icon, a label, and a chevron.
+///
+/// The three rows are the sheet's "open something" list, and they were three
+/// copies of the same twenty lines before this. They are also what the sheet
+/// ran out of vertical room for on a landscape window, so they are the part
+/// that has to stay easy to change.
+class _SheetRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SheetRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AppCard(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, color: cs.onSurface.withValues(alpha: 0.6), size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: cs.onSurface, fontSize: 14),
+            ),
+          ),
+          Icon(
+            Icons.chevron_right,
+            color: cs.onSurface.withValues(alpha: 0.6),
+            size: 20,
+          ),
+        ],
       ),
     );
   }

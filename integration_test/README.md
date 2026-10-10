@@ -87,6 +87,7 @@ and only run when asked for explicitly.
 | `disk_probe_test.dart` | the `df` command and parser against a real server's own output, not a fixture |
 | `command_session_test.dart` | a PTY session running a command: its output, its input path, and that a plain session is still a login shell |
 | `container_create_test.dart` | the built `docker run` reaching a real shell as separate arguments, and a host without Docker being reported as a failure |
+| `container_detail_test.dart` | the `docker inspect` template reaching a real shell byte for byte, and a host without Docker failing rather than rendering an empty container |
 
 | Test | What a failure means |
 | --- | --- |

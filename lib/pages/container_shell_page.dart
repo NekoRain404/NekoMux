@@ -15,6 +15,8 @@ import 'console/ssh_error_text.dart';
 import 'ssh_terminal_page.dart';
 import 'containers/container_action_sheet.dart';
 import 'containers/container_cards.dart';
+import 'containers/container_detail_loader.dart';
+import 'containers/container_detail_page.dart';
 import 'containers/container_log_dialog.dart';
 import 'containers/docker_commands.dart';
 import 'containers/docker_container.dart';
@@ -366,6 +368,27 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
       onRemove: () => _confirmRemoveContainer(container),
       onShowLogs: () => _showLogs(container),
       onOpenShell: () => _openContainerShell(container),
+      onShowDetail: () => _openDetail(container),
+    );
+  }
+
+  /// Opens the full `docker inspect` view for [container].
+  ///
+  /// The view is handed a loader, not a connection: this State is the only
+  /// object holding the SSH session, and the detail page is a view. Same
+  /// arrangement as the log viewer — and the reason both can be read, and
+  /// tested, without a server anywhere near them.
+  void _openDetail(DockerContainer container) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContainerDetailPage(
+          containerName: container.name,
+          // Reads the session when it runs rather than capturing one now, so a
+          // refresh after a reconnect uses the connection that exists then.
+          load: () => loadContainerDetail(_ssh, container.name),
+        ),
+      ),
     );
   }
 
