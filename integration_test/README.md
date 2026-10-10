@@ -101,6 +101,37 @@ trusted on a headless machine.
 
 这些测试都不需要截图：它们直接对字节断言，因此在无人值守的机器上也能运行并采信。
 
+## The half a device test cannot reach / 真机测试够不到的那一半
+
+`container_create_test.dart` proves the built `docker run` reaches a real shell
+as separate arguments. It cannot prove a daemon *accepts* it: the fixture has no
+Docker, and asserting against a fake daemon would prove nothing. That half is
+checked by hand, and it is worth re-running after any change to
+`buildDockerRun`.
+
+The command is taken from the app rather than retyped, so what gets checked is
+what ships:
+
+```bash
+dart --packages=.dart_tool/package_config.json tool/print_run_command.dart
+```
+
+Run what it prints, then read back what the daemon recorded. Each field below is
+one the form asked for, so each is an assertion, not a description:
+
+```bash
+docker inspect --format 'name={{.Name}} image={{.Config.Image}} restart={{.HostConfig.RestartPolicy.Name}}' nekomux-verify-command
+docker inspect --format 'port={{range $p, $b := .HostConfig.PortBindings}}{{$p}}->{{range $b}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}' nekomux-verify-command
+docker inspect --format 'env={{range .Config.Env}}{{.}} {{end}}' nekomux-verify-command
+docker rm -f nekomux-verify-command
+```
+
+`container_create_test.dart` 证明构造出的 `docker run` 能作为独立参数到达真实
+shell；它无法证明守护进程**接受**这条命令——夹具里没有 Docker，而对一个假守护进程
+断言什么都证明不了。这一半靠手工校验，对 `buildDockerRun` 的任何改动之后都值得重跑。
+
+命令取自应用本身而非重新敲一遍，因此被校验的就是真正发布的那个。
+
 ## Note / 注意
 
 The test build shares the app's `applicationId`, so running these **replaces the
