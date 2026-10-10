@@ -1,7 +1,7 @@
 name: neko_mux
 description: "NekoMux - All-in-One Server Management Tool. SSH, SFTP, monitoring."
 publish_to: "none"
-version: 2.0.0+2002
+version: 2.0.0-beta.1+2003
 
 environment:
   sdk: ^3.12.0

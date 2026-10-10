@@ -4,15 +4,21 @@ This document records how to build, verify, and install NekoMux release APKs.
 
 ## Release Metadata
 
-Current release:
+Current release: `2.0.0-beta.1` (beta)
 
 - App id: `com.nekomux.neko_mux`
-- Version name: `1.0.0`
-- Pubspec version: `1.0.0+1`
-- Split APK version codes:
-  - `armeabi-v7a`: `1001`
-  - `arm64-v8a`: `2001`
-  - `x86_64`: `4001`
+- Version name: `2.0.0-beta.1`
+- Pubspec version: `2.0.0-beta.1+2003`
+- Split APK version codes, read back from the built APKs with `aapt`:
+  - `armeabi-v7a`: `3003`
+  - `arm64-v8a`: `4003`
+  - `x86_64`: `6003`
+
+A split's version code is the pubspec build number (`2003`) plus a per-ABI
+offset — 1000 for `armeabi-v7a`, 2000 for `arm64-v8a`, 4000 for `x86_64`. The
+offset scheme is Flutter's; the numbers above are measured rather than
+calculated, so a change in that scheme shows up as a mismatch here instead of
+as a wrong expectation nobody checks.
 
 ## Signing Files
 
@@ -95,15 +101,19 @@ an uninstall, which wipes the user's hosts and credentials.
 
 ## Copy Release Outputs
 
+Set `VER` once and the rest of this page follows it. The version used to be
+written out in every command below, which is exactly how this document drifted
+two releases behind the app without anyone noticing — a stale literal in a
+command nobody re-read.
+
 ```bash
+VER=v2.0.0-beta.1+2003
 mkdir -p dist
-cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
-  dist/NekoMux-v1.0.0+1-arm64-v8a-release.apk
-cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
-  dist/NekoMux-v1.0.0+1-armeabi-v7a-release.apk
-cp build/app/outputs/flutter-apk/app-x86_64-release.apk \
-  dist/NekoMux-v1.0.0+1-x86_64-release.apk
-sha256sum dist/NekoMux-v1.0.0+1-*-release.apk > dist/SHA256SUMS.txt
+for abi in arm64-v8a armeabi-v7a x86_64; do
+  cp "build/app/outputs/flutter-apk/app-$abi-release.apk" \
+    "dist/NekoMux-$VER-$abi-release.apk"
+done
+sha256sum dist/NekoMux-$VER-*-release.apk > dist/SHA256SUMS.txt
 ```
 
 ## Verify
@@ -111,8 +121,9 @@ sha256sum dist/NekoMux-v1.0.0+1-*-release.apk > dist/SHA256SUMS.txt
 Use Android SDK build tools:
 
 ```bash
+VER=v2.0.0-beta.1+2003
 /home/nekorain/Android/Sdk/build-tools/37.0.0/apksigner verify \
-  --verbose --print-certs dist/NekoMux-v1.0.0+1-arm64-v8a-release.apk
+  --verbose --print-certs "dist/NekoMux-$VER-arm64-v8a-release.apk"
 ```
 
 Expected result:
@@ -125,20 +136,21 @@ Check ABI and version:
 
 ```bash
 /home/nekorain/Android/Sdk/build-tools/37.0.0/aapt dump badging \
-  dist/NekoMux-v1.0.0+1-arm64-v8a-release.apk
+  "dist/NekoMux-$VER-arm64-v8a-release.apk"
 ```
 
 Expected for the 64-bit phone package:
 
 - `native-code: 'arm64-v8a'`
-- `versionName='1.0.0'`
-- `versionCode='2001'`
+- `versionName='2.0.0-beta.1'`
+- `versionCode='4003'`
 
 ## Install On A 64-Bit Android Device
 
 ```bash
+VER=v2.0.0-beta.1+2003
 adb shell getprop ro.product.cpu.abi
-adb install -r dist/NekoMux-v1.0.0+1-arm64-v8a-release.apk
+adb install -r "dist/NekoMux-$VER-arm64-v8a-release.apk"
 ```
 
 If Android reports `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, the installed package
@@ -146,5 +158,10 @@ was signed with a different key. Uninstalling fixes it but clears app data:
 
 ```bash
 adb uninstall com.nekomux.neko_mux
-adb install dist/NekoMux-v1.0.0+1-arm64-v8a-release.apk
+adb install "dist/NekoMux-$VER-arm64-v8a-release.apk"
 ```
+
+An install over an existing build works whenever the certificate matches the
+one recorded above **and** the version code is higher. Both hold for a beta
+whose build number was incremented, which is why `2.0.0-beta.1+2003` installs
+over `2.0.0+2002` without an uninstall.
