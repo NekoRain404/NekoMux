@@ -13,6 +13,7 @@ import '../../core/theme/app_fonts.dart';
 import '../../core/i18n/strings.dart';
 import '../../widgets/app_ui.dart';
 import 'docker_container.dart';
+import 'docker_stats.dart';
 
 /// One container's status card: name, state dot, image, uptime and ports.
 /// 单个容器的状态卡片：名称、状态圆点、镜像、运行时间与端口映射。
@@ -34,11 +35,22 @@ class ContainerCard extends StatelessWidget {
   /// state the daemon has not reported yet.
   final bool busy;
 
+  /// Live resource use, or null when there is none to show.
+  ///
+  /// Optional because it comes from a second command that runs after the list
+  /// is already on screen: the listing is what the page is for, and these
+  /// numbers fill in when they arrive rather than holding the list back. A
+  /// stopped container has none, and a host that refused the snapshot leaves
+  /// every card without one — the row is absent rather than showing a zero,
+  /// which would be a measurement nobody took.
+  final ContainerStats? stats;
+
   const ContainerCard({
     super.key,
     required this.container,
     required this.onTap,
     this.busy = false,
+    this.stats,
   });
 
   @override
@@ -110,6 +122,49 @@ class ContainerCard extends StatelessWidget {
               ),
             ],
           ),
+
+          // Resource use sits directly under the name, ahead of the image and
+          // the uptime. It is the one line here that changes between two looks
+          // at this list, and finding the container that is eating the machine
+          // is the reason the list gets opened on a phone at all.
+          //
+          // Only the amount in use is shown, never `14.72MiB / 2GiB`: the
+          // daemon puts the host's total RAM after that slash for a container
+          // with no memory limit, and nothing in the snapshot says which case a
+          // row is. See `ContainerStats.memoryUsed`.
+          if (stats != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.speed,
+                  color: stats!.isBusy
+                      ? cs.error
+                      : cs.onSurface.withValues(alpha: 0.6),
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'CPU ${stats!.cpuPercent.toStringAsFixed(2)}% · '
+                    '${stats!.memoryUsed}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: stats!.isBusy
+                          ? cs.error
+                          : cs.onSurface.withValues(alpha: 0.75),
+                      fontSize: 12,
+                      fontFamily: AppFonts.mono,
+                      fontWeight: stats!.isBusy
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
 
           const SizedBox(height: 8),
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/haptics.dart';
@@ -18,9 +20,11 @@ import 'containers/container_cards.dart';
 import 'containers/container_detail_loader.dart';
 import 'containers/container_detail_page.dart';
 import 'containers/container_log_dialog.dart';
+import 'containers/container_states.dart';
 import 'containers/docker_commands.dart';
 import 'containers/docker_container.dart';
 import 'containers/docker_run_spec.dart';
+import 'containers/docker_stats.dart';
 import 'containers/new_container_page.dart';
 import 'containers/remote_action_outcome.dart';
 
@@ -51,6 +55,13 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
   bool _isRefreshing = false;
   String? _error;
   List<DockerContainer> _containers = [];
+
+  /// The latest resource snapshot, keyed by container name.
+  ///
+  /// Empty until the snapshot lands, and empty again if the host refused it.
+  /// Read per card rather than iterated, so a container that has gone leaves
+  /// nothing behind.
+  Map<String, ContainerStats> _stats = const {};
 
   /// Name of the container a `docker` command is currently running for, or null.
   String? _pendingContainer;
@@ -246,6 +257,10 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
           _error = null;
         });
       }
+      // Fired without awaiting: the listing is what the page is for and it is
+      // already on screen, so the resource numbers arrive a moment later rather
+      // than holding the list back behind a second command.
+      unawaited(_fetchStats());
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -254,6 +269,29 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
           _error = '${t('fetch_containers_failed')}: $e';
         });
       }
+    }
+  }
+
+  /// Reads one resource snapshot for whatever is currently listed.
+  ///
+  /// Deliberately quiet, and the only place in this page where a failed command
+  /// is not shown to the user. The reason is that nothing is being claimed: a
+  /// card without a resource line says it has no numbers, which is true, and
+  /// the alternative is replacing a working, accurate container list with an
+  /// error about a secondary read the user never asked for. A refusal here —
+  /// `permission denied` for a user who may list but not stat, a daemon too old
+  /// for the format — costs the numbers and nothing else.
+  Future<void> _fetchStats() async {
+    final ssh = _ssh;
+    if (ssh == null || ssh.state != SshConnectionState.connected) return;
+
+    try {
+      final result = await ssh.runCommand(dockerStatsCommand);
+      if (!result.ok) return;
+      final stats = parseDockerStats(result.combined);
+      if (mounted) setState(() => _stats = stats);
+    } catch (_) {
+      // Swallowed for the reason above: the page works without this.
     }
   }
 
@@ -597,133 +635,19 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
     final cs = Theme.of(context).colorScheme;
 
     /// Loading state. /// 加载状态。
-    if (_isLoading) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: cs.primary),
-            const SizedBox(height: 16),
-            Text(
-              t('loading_containers'),
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.6),
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    if (_isLoading) return const ContainerLoadingView();
 
     /// Error state with retry and reconnect buttons. /// 错误状态，带重试和重连按钮。
     if (_error != null) {
-      return Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.error_outline, color: cs.error, size: 48),
-              const SizedBox(height: 16),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                maxLines: 6,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.6),
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 12,
-                runSpacing: 10,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _connectAndFetch,
-                    icon: const Icon(Icons.link, size: 18),
-                    label: Text(
-                      t('reconnect'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: cs.secondary,
-                      side: BorderSide(color: cs.secondary),
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _fetchContainers,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: Text(
-                      t('retry'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: cs.primary,
-                      side: BorderSide(color: cs.primary),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+      return ContainerErrorView(
+        message: _error!,
+        onReconnect: _connectAndFetch,
+        onRetry: _fetchContainers,
       );
     }
 
     /// Empty state — no containers found. /// 空状态 — 未找到容器。
-    if (_containers.isEmpty) {
-      return RefreshIndicator(
-        color: cs.primary,
-        backgroundColor: cs.surface,
-        onRefresh: _onRefresh,
-        child: ListView(
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 120),
-              child: Center(
-                child: Column(
-                  children: [
-                    AppIconBox(
-                      icon: Icons.inventory_2_outlined,
-                      color: cs.primary,
-                      size: 64,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      t('no_containers'),
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: cs.onSurface.withValues(alpha: 0.6),
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      t('no_containers_hint'),
-                      textAlign: TextAlign.center,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: cs.onSurface.withValues(alpha: 0.56),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    if (_containers.isEmpty) return ContainerEmptyView(onRefresh: _onRefresh);
 
     /// Container list with pull-to-refresh. /// 容器列表，带下拉刷新。
     return RefreshIndicator(
@@ -746,6 +670,9 @@ class _ContainerShellPageState extends ConsumerState<ContainerShellPage> {
           return ContainerCard(
             busy: _pendingContainer == container.name,
             container: container,
+            // Absent for a stopped container and for any host that refused the
+            // snapshot; the card renders without the row either way.
+            stats: _stats[container.name],
             onTap: () => _showContainerActions(container),
           );
         },
