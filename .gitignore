@@ -53,10 +53,6 @@ app.*.map.json
 # forever. dist/SHA256SUMS.txt is still tracked so releases stay verifiable.
 /dist/*.apk
 
-# Vendored clone of the Termux app (9.7MB) with its own .git. Not referenced by
-# any build target. Excluded so it does not become a gitlink; see audit eng-3.
-/termux-app/
-
 # Gradle's own build output inside the Android module. The root rule above is
 # anchored to /build and does not match this one.
 /android/build/
